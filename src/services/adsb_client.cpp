@@ -16,7 +16,14 @@ namespace {
 
 constexpr char kApiBase[] = "https://opendata.adsb.fi/api/v3/lat/";
 constexpr float kKmPerNm = 1.852f;
+#if defined(TARGET_QUALIA_S3)
+// arduino-esp32 3.x applies the connect timeout to the whole TLS connect
+// (TCP + handshake), so it needs seconds. (On the 2.x C3 stack the timeout
+// bounded only the TCP connect, so 200 ms was fine there.)
+constexpr int kConnectAttemptMs = 8000;
+#else
 constexpr int kConnectAttemptMs = 200;
+#endif
 constexpr unsigned long kRequestTimeoutMs = 10000;
 
 Aircraft s_aircraft[kMaxAircraft];
