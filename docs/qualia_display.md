@@ -100,14 +100,16 @@ via `config::kUiScale` (= `kDisplayWidth / 240`, so 3× at 720 px):
   scale proportionally. The 240 px (C3) build is unchanged (`kUiScale == 1`).
 - **Status screens** — `ui/status_screens.cpp` scales its spinner/layout px and
   VLW font sizes the same way.
-- **Fonts** — the embedded VLW (`data/ui_font.vlw`) is rendered at **45 px
-  native** (3× the original 15 px), so text is only ever *downscaled* and stays
-  crisp on both builds. Fixed VLW multipliers (status screens) divide by
-  `config::kVlwNativeSizeScale`; adaptive radar labels (searched by target pixel
-  height) need no adjustment. Regenerate with:
+- **Fonts** — the embedded VLW (`data/ui_font.vlw`) is Noto Sans Regular
+  rendered at **45 px native** (3× the original 15 px), so text is only ever
+  *downscaled* and stays crisp on both builds. On-screen size is `config::kUiScale`
+  (panel) × `config::kUiFontScale` (global text multiplier, currently 0.8). Fixed
+  VLW multipliers (status screens) also divide by `config::kVlwNativeSizeScale`;
+  adaptive radar labels (searched by target pixel height) pick up the factors via
+  `fontPx()`. Regenerate (any weight/TTF) with:
 
   ```bash
-  python scripts/build_ui_font.py NotoSans-Bold.ttf   # -> data/ui_font.vlw
+  python scripts/build_ui_font.py NotoSans-Regular.ttf   # -> data/ui_font.vlw
   ```
 
 ## Controls (Phase 4)

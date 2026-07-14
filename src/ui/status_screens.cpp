@@ -19,7 +19,8 @@ constexpr int scaledPx(int px240) {
   return static_cast<int>(px240 * config::kUiScale + 0.5f);
 }
 constexpr float scaledVlw(float base240) {
-  return base240 * config::kUiScale / config::kVlwNativeSizeScale;
+  return base240 * config::kUiScale * config::kUiFontScale /
+         config::kVlwNativeSizeScale;
 }
 
 constexpr int kLineGap = scaledPx(6);

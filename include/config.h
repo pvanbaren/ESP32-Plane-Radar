@@ -71,6 +71,10 @@ constexpr float kUiScale = static_cast<float>(kDisplayWidth) / kUiBaseSize;
 // by target pixel height needs no adjustment.
 constexpr float kVlwNativeSizeScale = 45.0f / 15.0f;
 
+// Global multiplier on rendered text size (independent of the panel scale).
+// 1.0 = the baseline layout size; 0.5 = 50%.
+constexpr float kUiFontScale = 0.5f;
+
 // --- Radar center defaults (overridden via WiFi setup portal) ---
 constexpr double kDefaultRadarLat = 52.3676;
 constexpr double kDefaultRadarLon = 4.9041;
