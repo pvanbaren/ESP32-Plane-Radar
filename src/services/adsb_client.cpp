@@ -20,6 +20,7 @@ constexpr unsigned long kRequestTimeoutMs = 10000;
 
 Aircraft s_aircraft[kMaxAircraft];
 size_t s_aircraft_count = 0;
+unsigned long s_last_update_ms = 0;
 PollFn s_poll_fn = nullptr;
 
 void pollNetwork() {
@@ -205,6 +206,8 @@ size_t aircraftCount() { return s_aircraft_count; }
 
 const Aircraft* aircraftList() { return s_aircraft; }
 
+unsigned long lastUpdateMs() { return s_last_update_ms; }
+
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   const float dist_nm = kmToNauticalMiles(fetch_radius_km);
 
@@ -248,6 +251,9 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     return false;
   }
 
+  // Base time for dead-reckoning: the fetched positions are valid as of now.
+  s_last_update_ms = millis();
+
   JsonArray ac = doc["ac"].as<JsonArray>();
   if (ac.isNull()) {
     s_aircraft_count = 0;
@@ -271,6 +277,15 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     s_aircraft[n].nose_deg = pickNoseHeading(plane);
     s_aircraft[n].track_deg = pickTrackHeading(plane);
     s_aircraft[n].gs_knots = pickGroundSpeed(plane);
+
+    // seen_pos: seconds since this position was measured. Use it as the
+    // dead-reckoning age offset, capped so a very stale fix isn't flung far.
+    float seen_pos = 0.0f;
+    readJsonFloat(plane, "seen_pos", &seen_pos);
+    if (seen_pos < 0.0f) seen_pos = 0.0f;
+    if (seen_pos > 30.0f) seen_pos = 30.0f;
+    s_aircraft[n].pos_age_ms = static_cast<uint32_t>(seen_pos * 1000.0f);
+
     fillTagFields(&s_aircraft[n], plane);
     ++n;
   }
