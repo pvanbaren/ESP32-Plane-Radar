@@ -690,6 +690,7 @@ void renderFrame() {
     drawAircraft();
   }
   s_frame.pushSprite(0, 0);
+  displayPresent();
   tft.setTextDatum(textdatum_t::top_left);
 }
 
@@ -704,10 +705,12 @@ void radarDisplayDraw() {
     return;
   }
 
-  // Fallback when the sprite can't be allocated: draw straight to the panel.
+  // Fallback when the frame sprite can't be allocated: draw straight to the
+  // canvas/panel.
   const DrawScope scope(tft);
   drawStaticGrid(tft);
   drawAircraft();
+  displayPresent();
   tft.setTextDatum(textdatum_t::top_left);
 }
 
