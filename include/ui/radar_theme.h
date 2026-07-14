@@ -36,8 +36,10 @@ constexpr int kScaleBelowCardinalPx = scaledPx(3);
 
 constexpr int kRingCount = 4;
 
-/** Shared grid stroke: drawWideLine half-width (~2 px total); rings use the same px count. */
-constexpr float kGridStrokeHalfWidth = scaledPxF(1.0f);
+/** Shared grid stroke: drawWideLine half-width (2 px total); rings use the same
+ *  px count. Deliberately NOT scaled with the panel — a fixed thin grid line
+ *  reads better than a 6 px stroke at 720 px. */
+constexpr float kGridStrokeHalfWidth = 1.0f;
 
 constexpr int kCenterDotRadius = scaledPx(2);
 
