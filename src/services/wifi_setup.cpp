@@ -44,6 +44,11 @@ void IRAM_ATTR onBootButtonIsr() {
 }
 
 void initBootButton() {
+#if defined(TARGET_QUALIA_S3)
+  // GPIO9 is an RGB data line on the Qualia, not a button. Leave it to the LCD
+  // peripheral; physical controls move to the TCA9554 buttons in Phase 4.
+  return;
+#else
   pinMode(config::kBootPin, INPUT_PULLUP);
   if (s_boot_interrupt_attached) {
     return;
@@ -51,6 +56,7 @@ void initBootButton() {
   attachInterrupt(digitalPinToInterrupt(static_cast<uint8_t>(config::kBootPin)),
                   onBootButtonIsr, CHANGE);
   s_boot_interrupt_attached = true;
+#endif
 }
 
 namespace {
@@ -383,7 +389,11 @@ bool wifiShowsSetupScreenOnBoot() {
 }
 
 bool wifiBootButtonPressed() {
+#if defined(TARGET_QUALIA_S3)
+  return false;  // no GPIO boot button on this target (see initBootButton)
+#else
   return digitalRead(config::kBootPin) == LOW;
+#endif
 }
 
 void bootButtonInit() { initBootButton(); }

@@ -77,7 +77,9 @@ int measureVlwHeight(float size) {
 
 float findVlwSizeForHeight(int target_px) {
   float lo = 0.25f;
-  float hi = 1.2f;
+  // Upper bound must exceed the largest scaled target: on the 720 px build the
+  // cardinal cap height is ~42 px, which needs a VLW size around 1.7.
+  float hi = 3.5f;
   for (int i = 0; i < 16; ++i) {
     const float mid = (lo + hi) * 0.5f;
     if (measureVlwHeight(mid) < target_px) {
@@ -664,6 +666,11 @@ bool ensureFrameSprite() {
     return true;
   }
   s_frame.setColorDepth(16);
+#if defined(TARGET_QUALIA_S3)
+  // The 720x720x16bpp frame (~1 MB) can't fit in internal DMA RAM; put it in
+  // PSRAM. (On the 240 px build the sprite stays in internal RAM.)
+  s_frame.setPsram(true);
+#endif
   if (!s_frame.createSprite(radar::kSize, radar::kSize)) {
     Serial.println("radar: frame sprite alloc failed");
     return false;
