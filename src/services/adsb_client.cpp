@@ -6,6 +6,9 @@
 
 #include <ArduinoJson.h>
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+
 #include <cstring>
 
 #include "config.h"
@@ -30,6 +33,22 @@ Aircraft s_aircraft[kMaxAircraft];
 size_t s_aircraft_count = 0;
 unsigned long s_last_update_ms = 0;
 PollFn s_poll_fn = nullptr;
+SemaphoreHandle_t s_mutex = nullptr;
+
+/** Publish parsed aircraft to the shared buffer atomically. */
+void publish(const Aircraft* src, size_t count) {
+  if (s_mutex != nullptr) {
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+  }
+  for (size_t i = 0; i < count; ++i) {
+    s_aircraft[i] = src[i];
+  }
+  s_aircraft_count = count;
+  s_last_update_ms = millis();  // base time for dead-reckoning
+  if (s_mutex != nullptr) {
+    xSemaphoreGive(s_mutex);
+  }
+}
 
 void pollNetwork() {
   if (s_poll_fn != nullptr) {
@@ -208,6 +227,12 @@ void fillTagFields(Aircraft* ac, const JsonObject& plane) {
 
 }  // namespace
 
+void init() {
+  if (s_mutex == nullptr) {
+    s_mutex = xSemaphoreCreateMutex();
+  }
+}
+
 void setPollFn(PollFn fn) { s_poll_fn = fn; }
 
 size_t aircraftCount() { return s_aircraft_count; }
@@ -215,6 +240,25 @@ size_t aircraftCount() { return s_aircraft_count; }
 const Aircraft* aircraftList() { return s_aircraft; }
 
 unsigned long lastUpdateMs() { return s_last_update_ms; }
+
+size_t snapshotAircraft(Aircraft* out, size_t max_out,
+                        unsigned long* out_last_update_ms) {
+  if (s_mutex != nullptr) {
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+  }
+  const size_t count =
+      s_aircraft_count < max_out ? s_aircraft_count : max_out;
+  for (size_t i = 0; i < count; ++i) {
+    out[i] = s_aircraft[i];
+  }
+  if (out_last_update_ms != nullptr) {
+    *out_last_update_ms = s_last_update_ms;
+  }
+  if (s_mutex != nullptr) {
+    xSemaphoreGive(s_mutex);
+  }
+  return count;
+}
 
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   const float dist_nm = kmToNauticalMiles(fetch_radius_km);
@@ -258,37 +302,34 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     return false;
   }
 
-  // Base time for dead-reckoning: the fetched positions are valid as of now.
-  s_last_update_ms = millis();
-
-  JsonArray ac = doc["ac"].as<JsonArray>();
-  if (ac.isNull()) {
-    s_aircraft_count = 0;
-    return true;
-  }
-
+  // Parse into a local buffer, then publish atomically so a reader on another
+  // thread never sees a half-updated list.
+  Aircraft parsed[kMaxAircraft];
   size_t n = 0;
-  for (JsonObject plane : ac) {
-    if (n >= kMaxAircraft) {
-      break;
-    }
-    if (!plane["lat"].is<float>() || !plane["lon"].is<float>()) {
-      continue;
-    }
-    if (isOnGround(plane) && !config::kAdsbShowGroundAircraft) {
-      continue;
-    }
+  JsonArray ac = doc["ac"].as<JsonArray>();
+  if (!ac.isNull()) {
+    for (JsonObject plane : ac) {
+      if (n >= kMaxAircraft) {
+        break;
+      }
+      if (!plane["lat"].is<float>() || !plane["lon"].is<float>()) {
+        continue;
+      }
+      if (isOnGround(plane) && !config::kAdsbShowGroundAircraft) {
+        continue;
+      }
 
-    s_aircraft[n].lat = plane["lat"].as<float>();
-    s_aircraft[n].lon = plane["lon"].as<float>();
-    s_aircraft[n].nose_deg = pickNoseHeading(plane);
-    s_aircraft[n].track_deg = pickTrackHeading(plane);
-    s_aircraft[n].gs_knots = pickGroundSpeed(plane);
-    fillTagFields(&s_aircraft[n], plane);
-    ++n;
+      parsed[n].lat = plane["lat"].as<float>();
+      parsed[n].lon = plane["lon"].as<float>();
+      parsed[n].nose_deg = pickNoseHeading(plane);
+      parsed[n].track_deg = pickTrackHeading(plane);
+      parsed[n].gs_knots = pickGroundSpeed(plane);
+      fillTagFields(&parsed[n], plane);
+      ++n;
+    }
   }
 
-  s_aircraft_count = n;
+  publish(parsed, n);
   Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
   return true;
 }
