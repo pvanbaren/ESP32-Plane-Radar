@@ -68,6 +68,15 @@ void setup() {
   Serial.println();
   Serial.println("Plane Radar");
 
+#if defined(DISPLAY_TEST_PATTERN)
+  // Phase-2 bring-up: verify the panel on its own, then stop. No BOOT button
+  // (its GPIO collides with an RGB data line on the Qualia) and no WiFi/radar.
+  Serial.println("Display test pattern mode");
+  displayInit();
+  displayTestPattern();
+  return;
+#endif
+
   bootButtonInit();
   displayInit();
   if (wifiShowsSetupScreenOnBoot()) {
@@ -83,6 +92,11 @@ void setup() {
 }
 
 void loop() {
+#if defined(DISPLAY_TEST_PATTERN)
+  delay(1000);
+  return;
+#endif
+
   handleBootButton();
   wifiLoop();
 

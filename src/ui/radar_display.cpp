@@ -15,7 +15,8 @@
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
 
-namespace fonts = lgfx::v1::fonts;
+// LovyanGFX (>=~1.2.x) already exposes a global `fonts` namespace via
+// lgfx_fonts.hpp, so no local alias is needed (and an alias now collides).
 
 namespace ui {
 namespace radar {

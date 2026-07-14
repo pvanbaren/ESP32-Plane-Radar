@@ -29,6 +29,17 @@ constexpr unsigned long kBootResetHoldMs = 3000UL;
 /** Ignore BOOT taps shorter than this (debounce). */
 constexpr unsigned long kBootTapMinMs = 40UL;
 
+#if defined(TARGET_QUALIA_S3)
+// --- Display: NV3052C 4" round 720×720 (RGB666 parallel, Adafruit 5793) ---
+// RGB data/sync pins live in hardware/lgfx_config.hpp (LovyanGFX Bus_RGB);
+// the panel's register init + reset run over the TCA9554 I2C expander, see
+// hardware/qualia_nv3052c.*. No per-pin GPIO constants are needed here.
+constexpr int kDisplayWidth = 720;
+constexpr int kDisplayHeight = 720;
+// LovyanGFX Bus_RGB maps color565 to the panel in true RGB order, so the
+// radar palette needs no R/B swap (unlike the BGR GC9A01 module).
+constexpr bool kDisplayRgbOrder = false;
+#else
 // --- Display: GC9A01 1.28" round 240×240 (SPI) ---
 constexpr gpio_num_t kDisplayPinRst = GPIO_NUM_0;
 constexpr gpio_num_t kDisplayPinCs = GPIO_NUM_1;
@@ -43,6 +54,7 @@ constexpr uint32_t kDisplaySpiWriteHz = 40000000;
 // GC9A01 modules often need invert + BGR for correct black/green output
 constexpr bool kDisplayInvert = true;
 constexpr bool kDisplayRgbOrder = true;
+#endif
 
 // --- Radar center defaults (overridden via WiFi setup portal) ---
 constexpr double kDefaultRadarLat = 52.3676;
