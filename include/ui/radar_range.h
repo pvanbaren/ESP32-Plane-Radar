@@ -23,12 +23,18 @@ struct RangePreset {
 };
 
 constexpr float kRing3ToOuterKm = 4.0f / 3.0f;
+constexpr float kKmPerMile = 1.609344f;
+
+// Presets expressed in miles (ring 3 = 3/4 of the outer radius), stored in km.
+// The ring-3 label renders in mi or km per the units setting.
+constexpr RangePreset kMilePreset(float miles) {
+  return {miles * kKmPerMile, miles * kKmPerMile * kRing3ToOuterKm};
+}
 
 constexpr RangePreset kRangePresets[] = {
-    {5.0f, 5.0f * kRing3ToOuterKm},
-    {10.0f, 10.0f * kRing3ToOuterKm},
-    {15.0f, 15.0f * kRing3ToOuterKm},
-    {25.0f, 25.0f * kRing3ToOuterKm},
+    kMilePreset(3.0f),  kMilePreset(6.0f),  kMilePreset(9.0f),
+    kMilePreset(12.0f), kMilePreset(15.0f), kMilePreset(21.0f),
+    kMilePreset(30.0f), kMilePreset(45.0f),
 };
 
 constexpr size_t kRangePresetCount =

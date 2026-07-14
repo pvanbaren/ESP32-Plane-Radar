@@ -15,8 +15,8 @@ constexpr char kPrefsNamespace[] = "planeradar";
 constexpr char kPrefsRangeKey[] = "rangeIdx";
 constexpr char kPrefsMilesKey[] = "useMiles";
 constexpr char kPrefsRunwaysKey[] = "showRwys";
-constexpr uint8_t kDefaultRangeIndex = 1;  // 10 km ring
-constexpr float kKmPerMile = 1.609344f;
+constexpr uint8_t kDefaultRangeIndex = 1;  // 6 mi ring
+// kKmPerMile is defined in radar_range.h (ui::radar).
 
 Preferences s_prefs;
 uint8_t s_range_index = kDefaultRangeIndex;

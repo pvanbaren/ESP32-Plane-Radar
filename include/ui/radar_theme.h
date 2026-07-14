@@ -34,10 +34,10 @@ constexpr int kCardinalSouthOffsetY = scaledPx(3);
 /** Gap between scale label right edge and outer ring on the east spoke (px). */
 constexpr int kScaleGapFromOuterRing = scaledPx(6);
 
-/** Target cap height (px) for N/S/E/W. */
-constexpr int kCardinalLabelHeightPx = fontPx(14);
-/** Scale label is this many px shorter than cardinals. */
-constexpr int kScaleBelowCardinalPx = fontPx(3);
+/** Target cap height (px) for N/S/E/W — full size (not reduced by the font scale). */
+constexpr int kCardinalLabelHeightPx = scaledPx(14);
+/** Target cap height (px) for the range/scale label (follows the font scale). */
+constexpr int kScaleLabelHeightPx = fontPx(11);
 
 constexpr int kRingCount = 4;
 
@@ -66,7 +66,7 @@ constexpr float kAircraftTrackLineHalfWidth = 1.0f;
 
 constexpr float kRunwayLineWidthPx = scaledPxF(2.0f);
 constexpr float kRunwayLineHalfWidth = kRunwayLineWidthPx * 0.5f;
-constexpr int kRunwayLabelHeightPx = kCardinalLabelHeightPx;
+constexpr int kRunwayLabelHeightPx = fontPx(14);
 constexpr int kRunwayLabelGapPx = scaledPx(3);
 /** Gap from triangle edge to tag block (px). */
 constexpr int kAircraftLabelGapPx = scaledPx(1);

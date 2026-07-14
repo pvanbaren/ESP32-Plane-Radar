@@ -55,6 +55,11 @@ machine:
 If a `pio` build ever reports "Failed to install Python dependencies into penv"
 or "No module named esptool/requests/urllib3", re-run step 1.
 
+**Build the `qualia_s3` env from a normal shell (PowerShell/cmd), not git-bash
+/ MSYS.** pioarduino's `idf_tools.py` aborts with "MSys/Mingw is not supported"
+when `MSYSTEM` is set, which happens under git-bash. (The C3 `supermini` env is
+fine from any shell.)
+
 ## Build & flash
 
 ```bash

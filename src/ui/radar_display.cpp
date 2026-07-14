@@ -121,11 +121,10 @@ void initLabelMetrics() {
 
   const int cardinal_target = radar::kCardinalLabelHeightPx;
 
+  const int scale_target = radar::kScaleLabelHeightPx;
   if (displayFontIsSmooth()) {
     s_cardinal_use_vlw = true;
     s_cardinal_vlw_size = findVlwSizeForHeight(cardinal_target);
-    const int cardinal_h = measureVlwHeight(s_cardinal_vlw_size);
-    const int scale_target = cardinal_h - radar::kScaleBelowCardinalPx;
     s_scale_use_vlw = true;
     s_scale_vlw_size = findVlwSizeForHeight(scale_target);
   } else {
@@ -135,8 +134,6 @@ void initLabelMetrics() {
         pickGfxFontClosest(cardinal_target, cardinal_candidates, 2);
     s_cardinal_use_vlw = false;
 
-    const int cardinal_h = measureGfxHeight(*s_cardinal_gfx);
-    const int scale_target = cardinal_h - radar::kScaleBelowCardinalPx;
     const lgfx::GFXfont* scale_candidates[] = {&fonts::FreeSansBold9pt7b,
                                                &fonts::FreeSansBold12pt7b};
     s_scale_gfx = pickGfxFontClosest(scale_target, scale_candidates, 2);
