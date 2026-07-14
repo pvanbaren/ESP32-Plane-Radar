@@ -15,6 +15,7 @@
 #endif
 
 #include "config.h"
+#include "hardware/qualia_nv3052c.h"
 #include "services/radar_location.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
@@ -390,7 +391,9 @@ bool wifiShowsSetupScreenOnBoot() {
 
 bool wifiBootButtonPressed() {
 #if defined(TARGET_QUALIA_S3)
-  return false;  // no GPIO boot button on this target (see initBootButton)
+  // DN button (TCA9554) drives the hold-to-reset gesture; the existing
+  // poll-based long-press logic handles it exactly like the C3 BOOT button.
+  return (qualiaButtonMask() & kQualiaBtnDown) != 0;
 #else
   return digitalRead(config::kBootPin) == LOW;
 #endif

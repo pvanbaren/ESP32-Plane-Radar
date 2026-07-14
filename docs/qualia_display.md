@@ -110,9 +110,17 @@ via `config::kUiScale` (= `kDisplayWidth / 240`, so 3× at 720 px):
   python scripts/build_ui_font.py NotoSans-Bold.ttf   # -> data/ui_font.vlw
   ```
 
-### Known limitations (Phase 4 TODO)
+## Controls (Phase 4)
 
-- Physical controls (range cycle, Wi-Fi reset) are **disabled** on the Qualia:
-  the C3 used the BOOT button on GPIO 9, which is an RGB data line here. Input
-  moves to the TCA9554 buttons (UP = bit 5, DN = bit 6). Range still defaults
-  and persists via NVS; it just can't be changed from the device yet.
+The C3's single BOOT button (GPIO 9) is an RGB data line on the Qualia, so
+controls use the two **TCA9554 buttons** instead (polled over I²C, active-low):
+
+| Button | Gesture | Effect |
+|--------|---------|--------|
+| **UP** (expander bit 5) | tap | Cycle range preset (5 → 10 → 15 → 25 km) |
+| **DN** (expander bit 6) | hold 3 s | Clear Wi-Fi / location / units, reboot to setup |
+
+If your board doesn't populate these buttons, the controls simply never
+trigger (range still defaults and persists via NVS). If a button reads
+inverted, flip the active-low sense in `qualiaButtonMask()`
+(`hardware/qualia_nv3052c.cpp`).
