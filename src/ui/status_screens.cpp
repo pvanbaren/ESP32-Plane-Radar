@@ -21,7 +21,9 @@ namespace {
 constexpr int scaledPx(int px240) {
   return static_cast<int>(px240 * config::kUiScale + 0.5f);
 }
-constexpr float scaledVlw(float base240) { return base240 * config::kUiScale; }
+constexpr float scaledVlw(float base240) {
+  return base240 * config::kUiScale / config::kVlwNativeSizeScale;
+}
 
 constexpr int kLineGap = scaledPx(6);
 const int kCenterX = config::kDisplayWidth / 2;
