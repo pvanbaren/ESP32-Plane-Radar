@@ -231,7 +231,9 @@ void extrapolatedLatLon(const services::adsb::Aircraft& plane,
   if (base_ms == 0 || plane.gs_knots <= 0.0f) {
     return;
   }
-  const float elapsed_h = static_cast<float>(millis() - base_ms) / 3600000.0f;
+  // Elapsed since the fix was measured = time since fetch + the fix's own age.
+  const unsigned long elapsed_ms = (millis() - base_ms) + plane.pos_age_ms;
+  const float elapsed_h = static_cast<float>(elapsed_ms) / 3600000.0f;
   const float dist_km = plane.gs_knots * 1.852f * elapsed_h;  // knots -> km
   if (dist_km <= 0.0f) {
     return;

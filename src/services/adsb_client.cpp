@@ -325,6 +325,15 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
       parsed[n].nose_deg = pickNoseHeading(plane);
       parsed[n].track_deg = pickTrackHeading(plane);
       parsed[n].gs_knots = pickGroundSpeed(plane);
+
+      // seen_pos: seconds since this position was measured. Use it as the
+      // dead-reckoning age offset, capped so a very stale fix isn't flung far.
+      float seen_pos = 0.0f;
+      readJsonFloat(plane, "seen_pos", &seen_pos);
+      if (seen_pos < 0.0f) seen_pos = 0.0f;
+      if (seen_pos > 30.0f) seen_pos = 30.0f;
+      parsed[n].pos_age_ms = static_cast<uint32_t>(seen_pos * 1000.0f);
+
       fillTagFields(&parsed[n], plane);
       ++n;
     }
