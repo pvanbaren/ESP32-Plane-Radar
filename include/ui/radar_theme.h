@@ -55,8 +55,9 @@ constexpr int kAircraftSpeedLineMinPx = scaledPx(2);
 constexpr float kAircraftTrackRefOuterKm = 13.3f;
 /** Shorter than full 60 s horizon at ref scale; ×1.5 length boost applied. */
 constexpr float kAircraftTrackLengthScale = 1.5f / 5.0f;
-/** drawWideLine half-width for speed vectors (~2 px total). */
-constexpr float kAircraftTrackLineHalfWidth = scaledPxF(1.0f);
+/** drawWideLine half-width for speed vectors (2 px total). Fixed, not scaled —
+ *  matches the thin grid stroke rather than growing to 6 px at 720. */
+constexpr float kAircraftTrackLineHalfWidth = 1.0f;
 
 constexpr float kRunwayLineWidthPx = scaledPxF(2.0f);
 constexpr float kRunwayLineHalfWidth = kRunwayLineWidthPx * 0.5f;
