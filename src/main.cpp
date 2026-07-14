@@ -21,6 +21,11 @@ bool g_radar_visible = false;
 unsigned long g_wifi_down_since = 0;
 unsigned long g_last_reconnect_ms = 0;
 unsigned long g_last_adsb_fetch_ms = 0;
+#if defined(TARGET_QUALIA_S3)
+bool g_status_visible = false;
+unsigned long g_status_shown_ms = 0;
+unsigned long g_last_status_refresh_ms = 0;
+#endif
 
 void showRadarIfConnected() {
   if (WiFi.status() != WL_CONNECTED) {
@@ -38,28 +43,45 @@ void onRangeTap() {
   Serial.printf("Range: %s (outer ~%.0f km)\n", range_label,
                 ui::radar::rangeCurrent().outer_km);
 
+#if defined(TARGET_QUALIA_S3)
+  // Don't repaint the radar over the status screen while it's up; the new range
+  // takes effect and shows when the status screen is dismissed.
+  if (g_status_visible) {
+    return;
+  }
+#endif
   if (g_radar_visible && WiFi.status() == WL_CONNECTED) {
     ui::radarDisplayDraw();
   }
 }
+#if defined(TARGET_QUALIA_S3)
+
+// DN tap toggles the status readout (IP, Wi-Fi, home lat/lon). Rendering and the
+// auto-return timeout are handled in loop(); this just flips the state and forces
+// an immediate (re)draw of whichever view should now be showing.
+void toggleStatusScreen() {
+  g_status_visible = !g_status_visible;
+  g_status_shown_ms = millis();
+  g_last_status_refresh_ms = 0;  // draw the status screen on the next loop pass
+  if (!g_status_visible) {
+    g_last_redraw_ms = 0;  // return to the radar immediately
+  }
+}
+#endif
 
 void handleBootButton() {
   bootButtonPollLongPress();
 
 #if defined(TARGET_QUALIA_S3)
-  // Poll the UP button (TCA9554) for a tap → cycle range. The C3 does this via
-  // a GPIO interrupt, but the expander has no interrupt line, so edge-detect
-  // the release here with a short debounce (kBootTapMinMs).
-  static bool up_was_down = false;
-  static unsigned long up_down_ms = 0;
-  const bool up_down = (qualiaButtonMask() & kQualiaBtnUp) != 0;
-  if (up_down && !up_was_down) {
-    up_down_ms = millis();
-  } else if (!up_down && up_was_down &&
-             millis() - up_down_ms >= config::kBootTapMinMs) {
+  // Taps are latched by the background task (qualiaButtonsStart), so they're
+  // caught even while this loop is blocked in an ADS-B fetch. UP → range up,
+  // DN → status screen.
+  if (qualiaConsumeUpTap()) {
     onRangeTap();
   }
-  up_was_down = up_down;
+  if (qualiaConsumeDownTap()) {
+    toggleStatusScreen();
+  }
 #endif
 
   if (bootButtonConsumeTap()) {
@@ -98,6 +120,9 @@ void setup() {
 
   bootButtonInit();
   displayInit();
+#if defined(TARGET_QUALIA_S3)
+  qualiaButtonsStart();  // async button polling (I2C is up after displayInit)
+#endif
   if (wifiShowsSetupScreenOnBoot()) {
     statusScreenPortal();
   }
@@ -119,6 +144,23 @@ void loop() {
   handleBootButton();
   wifiLoop();
 
+#if defined(TARGET_QUALIA_S3)
+  if (g_status_visible) {
+    if (millis() - g_status_shown_ms >= config::kStatusScreenTimeoutMs) {
+      // Auto-return to the radar; fall through and let it redraw this pass.
+      g_status_visible = false;
+      g_last_redraw_ms = 0;
+    } else {
+      if (millis() - g_last_status_refresh_ms >= config::kStatusRefreshMs) {
+        g_last_status_refresh_ms = millis();
+        statusScreenInfo();  // refresh IP/RSSI/etc. while shown
+      }
+      delay(10);
+      return;
+    }
+  }
+
+#endif
   if (WiFi.status() != WL_CONNECTED) {
     if (g_radar_visible) {
       Serial.println("WiFi lost — will reconnect");

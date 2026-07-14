@@ -83,6 +83,13 @@ constexpr double kDefaultRadarLon = 4.9041;
 constexpr unsigned long kAdsbFetchIntervalMs = 3000;
 /** Legacy scale unused — fetch uses radar::fetchRadiusKm() to screen edge. */
 constexpr float kAdsbFetchRadiusScale = 1.0f;
+#if defined(TARGET_QUALIA_S3)
+
+/** Status screen (DN tap): refresh cadence while shown, and how long before it
+ *  auto-returns to the radar so the display doesn't sit on it indefinitely. */
+constexpr unsigned long kStatusRefreshMs = 1000;
+constexpr unsigned long kStatusScreenTimeoutMs = 20000;
+#endif
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */
 constexpr bool kAdsbShowGroundAircraft = false;
 

@@ -1,5 +1,9 @@
 #include "ui/status_screens.h"
 
+#if defined(TARGET_QUALIA_S3)
+#include <Arduino.h>
+#include <WiFi.h>
+#endif
 #include <lgfx/v1/lgfx_fonts.hpp>
 
 #include <cmath>
@@ -10,6 +14,9 @@
 #include "config.h"
 #include "hardware/display.h"
 #include "hardware/display_font.h"
+#if defined(TARGET_QUALIA_S3)
+#include "services/radar_location.h"
+#endif
 
 namespace {
 
@@ -266,3 +273,63 @@ void statusScreenWifiReset() {
   drawTextBlock(config::kColorYellow, config::kTextOnYellow, lines,
                 sizeof(lines) / sizeof(lines[0]));
 }
+#if defined(TARGET_QUALIA_S3)
+
+void statusScreenInfo() {
+  // Buffers must outlive the drawTextBlock() call below (TextLine holds pointers,
+  // not copies), so keep them in this scope.
+  static char wifi_line[24];
+  static char ssid_line[40];
+  static char ip_line[32];
+  static char host_line[48];
+  static char heap_line[28];
+  static char sketch_line[28];
+  static char temp_line[20];
+  static char uptime_line[28];
+  static char loc_line[32];
+
+  const bool connected = WiFi.status() == WL_CONNECTED;
+
+  TextLine lines[10];
+  size_t n = 0;
+  lines[n++] = {"Status", 1.15f, &kGfxTitle};
+
+  if (connected) {
+    snprintf(wifi_line, sizeof(wifi_line), "Wi-Fi  %d dBm",
+             static_cast<int>(WiFi.RSSI()));
+    // SSID truncated so it stays inside the round bezel.
+    snprintf(ssid_line, sizeof(ssid_line), "%.24s", WiFi.SSID().c_str());
+    snprintf(ip_line, sizeof(ip_line), "IP %s",
+             WiFi.localIP().toString().c_str());
+    lines[n++] = {wifi_line, 1.0f, &kGfxBody};
+    lines[n++] = {ssid_line, 1.0f, &kGfxBody};
+    lines[n++] = {ip_line, 1.0f, &kGfxBody};
+  } else {
+    snprintf(wifi_line, sizeof(wifi_line), "Wi-Fi offline");
+    lines[n++] = {wifi_line, 1.0f, &kGfxBody};
+  }
+
+  // Device/diagnostic fields (shown whether or not Wi-Fi is up).
+  snprintf(host_line, sizeof(host_line), "http://%s", config::kPortalHostUrl);
+  snprintf(heap_line, sizeof(heap_line), "Free heap %u KB",
+           static_cast<unsigned>(ESP.getFreeHeap() / 1024));
+  snprintf(sketch_line, sizeof(sketch_line), "Sketch %u KB",
+           static_cast<unsigned>(ESP.getSketchSize() / 1024));
+  snprintf(temp_line, sizeof(temp_line), "Temp %.1f C", temperatureRead());
+  // Uptime from millis(); wraps after ~49.7 days (uint32 ms), acceptable here.
+  const unsigned long up_min = millis() / 60000UL;
+  snprintf(uptime_line, sizeof(uptime_line), "Up %lud %luh %lum",
+           up_min / 1440UL, (up_min % 1440UL) / 60UL, up_min % 60UL);
+  snprintf(loc_line, sizeof(loc_line), "%.5f, %.5f", services::location::lat(),
+           services::location::lon());
+
+  lines[n++] = {host_line, 1.0f, &kGfxBody};
+  lines[n++] = {heap_line, 1.0f, &kGfxBody};
+  lines[n++] = {sketch_line, 1.0f, &kGfxBody};
+  lines[n++] = {temp_line, 1.0f, &kGfxBody};
+  lines[n++] = {uptime_line, 1.0f, &kGfxBody};
+  lines[n++] = {loc_line, 1.0f, &kGfxBody};
+
+  drawTextBlock(config::kColorBlack, config::kTextOnBlack, lines, n);
+}
+#endif  // TARGET_QUALIA_S3
