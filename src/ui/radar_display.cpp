@@ -53,8 +53,13 @@ int s_scale_label_max_w = 0;
 int s_scale_label_h = 0;
 
 lgfx::LovyanGFX* s_draw = &tft;
+#if !defined(TARGET_QUALIA_S3)
+// C3 only: the GC9A01 is a live SPI panel, so compose off-screen here and blit
+// in one pass. On the Qualia `tft` is itself an off-screen canvas, so this
+// intermediate buffer (and its per-frame copy) is unnecessary.
 LGFX_Sprite s_frame(&tft);
 bool s_frame_ready = false;
+#endif
 
 class DrawScope {
  public:
@@ -660,16 +665,12 @@ void drawStaticGrid(Gfx& gfx) {
   gfx.setTextDatum(textdatum_t::top_left);
 }
 
+#if !defined(TARGET_QUALIA_S3)
 bool ensureFrameSprite() {
   if (s_frame_ready) {
     return true;
   }
   s_frame.setColorDepth(16);
-#if defined(TARGET_QUALIA_S3)
-  // The 720x720x16bpp frame (~1 MB) can't fit in internal DMA RAM; put it in
-  // PSRAM. (On the 240 px build the sprite stays in internal RAM.)
-  s_frame.setPsram(true);
-#endif
   if (!s_frame.createSprite(radar::kSize, radar::kSize)) {
     Serial.println("radar: frame sprite alloc failed");
     return false;
@@ -677,18 +678,35 @@ bool ensureFrameSprite() {
   s_frame_ready = true;
   return true;
 }
+#endif
 
-// Double-buffered frame: composite the grid AND aircraft into the off-screen
-// sprite, then blit it to the panel in a single pushSprite. Because the panel
-// is updated in one pass, labels never show an erase/redraw gap — no flicker.
 void renderFrame() {
-  drawStaticGrid(s_frame);  // opens its own DrawScope(s_frame)
+#if defined(TARGET_QUALIA_S3)
+  // `tft` is an off-screen canvas: compose the grid + aircraft directly into it
+  // (no intermediate sprite), then present. The esp_lcd double-buffer swap is
+  // the flicker-free step, and drawing into the unshown canvas never tears.
+  drawStaticGrid(tft);
   {
-    const DrawScope scope(s_frame);
+    const DrawScope scope(tft);
     drawAircraft();
   }
-  s_frame.pushSprite(0, 0);
   displayPresent();
+#else
+  // GC9A01 is a live SPI panel: composite off-screen and blit in one pass so
+  // labels never show an erase/redraw gap.
+  if (ensureFrameSprite()) {
+    drawStaticGrid(s_frame);
+    {
+      const DrawScope scope(s_frame);
+      drawAircraft();
+    }
+    s_frame.pushSprite(0, 0);
+  } else {
+    const DrawScope scope(tft);
+    drawStaticGrid(tft);
+    drawAircraft();
+  }
+#endif
   tft.setTextDatum(textdatum_t::top_left);
 }
 
@@ -697,30 +715,12 @@ void renderFrame() {
 void radarDisplayDraw() {
   initPalette();
   initLabelMetrics();
-
-  if (ensureFrameSprite()) {
-    renderFrame();
-    return;
-  }
-
-  // Fallback when the frame sprite can't be allocated: draw straight to the
-  // canvas/panel.
-  const DrawScope scope(tft);
-  drawStaticGrid(tft);
-  drawAircraft();
-  displayPresent();
-  tft.setTextDatum(textdatum_t::top_left);
+  renderFrame();
 }
 
 void radarDisplayRefreshAircraft() {
   initPalette();
-
-  if (ensureFrameSprite()) {
-    renderFrame();
-    return;
-  }
-
-  radarDisplayDraw();
+  renderFrame();
 }
 
 }  // namespace ui
