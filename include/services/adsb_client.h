@@ -17,6 +17,17 @@ struct Aircraft {
 
 constexpr size_t kMaxAircraft = 64;
 
+/** Create the internal lock. Call once before any fetch/snapshot. */
+void init();
+
+/**
+ * Copy the current aircraft into `out` (up to `max_out`) and report the fetch
+ * timestamp, all under a lock — safe to call from a different thread than the
+ * one running fetchUpdate(). Returns the number copied.
+ */
+size_t snapshotAircraft(Aircraft* out, size_t max_out,
+                        unsigned long* out_last_update_ms);
+
 size_t aircraftCount();
 const Aircraft* aircraftList();
 

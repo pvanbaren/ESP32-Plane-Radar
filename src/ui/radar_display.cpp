@@ -224,11 +224,10 @@ void offsetKmFromCenter(float lat, float lon, float* dx_km, float* dy_km,
  * track, so it moves smoothly between ADS-B updates. Uses the same flat
  * 1° ≈ 111 km projection as offsetKmFromCenter(), so it round-trips exactly.
  */
-void extrapolatedLatLon(const services::adsb::Aircraft& plane, float* lat,
-                        float* lon) {
+void extrapolatedLatLon(const services::adsb::Aircraft& plane,
+                        unsigned long base_ms, float* lat, float* lon) {
   *lat = plane.lat;
   *lon = plane.lon;
-  const unsigned long base_ms = services::adsb::lastUpdateMs();
   if (base_ms == 0 || plane.gs_knots <= 0.0f) {
     return;
   }
@@ -518,8 +517,11 @@ void sortBeyondDotsFarFirst(BeyondDotDrawItem* items, size_t count) {
 void drawAircraft() {
   initLabelMetrics();
 
-  const size_t n = services::adsb::aircraftCount();
-  const services::adsb::Aircraft* planes = services::adsb::aircraftList();
+  // Snapshot under the adsb lock (the fetch may run on another thread).
+  static services::adsb::Aircraft planes[services::adsb::kMaxAircraft];
+  unsigned long base_ms = 0;
+  const size_t n = services::adsb::snapshotAircraft(
+      planes, services::adsb::kMaxAircraft, &base_ms);
 
   AircraftDrawItem items[services::adsb::kMaxAircraft];
   BeyondDotDrawItem dots[services::adsb::kMaxAircraft];
@@ -530,7 +532,7 @@ void drawAircraft() {
     // Dead-reckoned position for smooth motion between fetches.
     float lat = 0.0f;
     float lon = 0.0f;
-    extrapolatedLatLon(planes[i], &lat, &lon);
+    extrapolatedLatLon(planes[i], base_ms, &lat, &lon);
 
     float dx_km = 0.0f;
     float dy_km = 0.0f;

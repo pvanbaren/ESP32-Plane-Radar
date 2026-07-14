@@ -20,7 +20,6 @@ namespace {
 bool g_radar_visible = false;
 unsigned long g_wifi_down_since = 0;
 unsigned long g_last_reconnect_ms = 0;
-unsigned long g_last_adsb_fetch_ms = 0;
 unsigned long g_last_redraw_ms = 0;
 #if defined(TARGET_QUALIA_S3)
 bool g_status_visible = false;
@@ -90,15 +89,19 @@ void handleBootButton() {
   }
 }
 
-void fetchAndDrawAircraft() {
-  const float fetch_km = ui::radar::fetchRadiusKm();
-  if (!services::adsb::fetchUpdate(services::location::lat(),
-                                   services::location::lon(), fetch_km)) {
-    handleBootButton();
-    return;
+// ADS-B fetch runs on its own task: the HTTPS request blocks for ~1-2 s, and
+// keeping it off the main loop lets the radar keep redrawing (dead-reckoned) at
+// 2 Hz throughout. The task publishes into the shared aircraft buffer under a
+// lock; the render loop reads a snapshot.
+void adsbFetchTask(void*) {
+  for (;;) {
+    if (WiFi.status() == WL_CONNECTED) {
+      services::adsb::fetchUpdate(services::location::lat(),
+                                  services::location::lon(),
+                                  ui::radar::fetchRadiusKm());
+    }
+    vTaskDelay(pdMS_TO_TICKS(config::kAdsbFetchIntervalMs));
   }
-  ui::radarDisplayRefreshAircraft();
-  handleBootButton();
 }
 
 }  // namespace
@@ -129,11 +132,15 @@ void setup() {
   }
   services::location::init();
   ui::radar::rangeInit();
-  services::adsb::setPollFn(wifiLoop);
+  services::adsb::init();
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();
   }
+
+  // Start the background ADS-B fetch (pinned to core 0, away from the render
+  // loop on core 1). It checks Wi-Fi state each cycle.
+  xTaskCreatePinnedToCore(adsbFetchTask, "adsb", 16384, nullptr, 1, nullptr, 0);
 }
 
 void loop() {
@@ -185,13 +192,9 @@ void loop() {
     g_wifi_down_since = 0;
     if (!g_radar_visible) {
       showRadarIfConnected();
-    } else if (millis() - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
-      // Refresh aircraft data from adsb.fi (~every 3 s); also redraws.
-      g_last_adsb_fetch_ms = millis();
-      fetchAndDrawAircraft();
-      g_last_redraw_ms = millis();
     } else if (millis() - g_last_redraw_ms >= config::kRadarRedrawIntervalMs) {
-      // Between fetches, redraw at 2 Hz with dead-reckoned positions.
+      // Redraw at 2 Hz with dead-reckoned positions; the ADS-B fetch runs on
+      // its own task (adsbFetchTask).
       g_last_redraw_ms = millis();
       ui::radarDisplayRefreshAircraft();
     }
