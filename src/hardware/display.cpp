@@ -2,22 +2,42 @@
 
 #include "hardware/display_font.h"
 #include "hardware/qualia_nv3052c.h"
+#include "hardware/qualia_rgb.h"
 
 LGFX tft;
 
 void displayInit() {
 #if defined(TARGET_QUALIA_S3)
-  // The RGB bus can't send panel commands, so reset + register-init the
-  // NV3052C over the I2C expander before LovyanGFX starts streaming pixels.
+  // 1. Reset + register-init the NV3052C over the I2C expander.
   if (!qualiaPanelInit()) {
     Serial.println("Panel init failed — display may stay blank");
   }
-#endif
+  // 2. Start the double-buffered esp_lcd RGB output stage.
+  if (!qualiaRgbInit()) {
+    Serial.println("RGB panel init failed — display may stay blank");
+  }
+  // 3. Draw directly into the panel's back framebuffer (no separate canvas):
+  //    displayPresent() swaps buffers and re-points tft at the new back one.
+  tft.setBuffer(qualiaRgbBackBuffer(), config::kDisplayWidth,
+                config::kDisplayHeight);
+  tft.setTextWrap(false);
+  displayFontInit();
+#else
   tft.init();
   tft.setRotation(0);
   tft.setBrightness(255);
   tft.setTextWrap(false);
   displayFontInit();
+#endif
+}
+
+void displayPresent() {
+#if defined(TARGET_QUALIA_S3)
+  qualiaRgbPresent();  // swap the drawn back buffer to the panel (no copy)
+  // Re-point tft at the new back buffer for the next frame.
+  tft.setBuffer(qualiaRgbBackBuffer(), config::kDisplayWidth,
+                config::kDisplayHeight);
+#endif
 }
 
 void displayTestPattern() {

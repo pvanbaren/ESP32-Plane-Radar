@@ -13,16 +13,23 @@ The NV3052C is an RGB-parallel ("DotClock") panel: the ESP32-S3 LCD peripheral
 streams pixels continuously over 16 data lines + PCLK/HSYNC/VSYNC/DE. That path
 has **no command channel**, so the panel's power-on register init and reset are
 done separately over the on-board **TCA9554 I²C expander** (addr `0x3F`) as a
-bit-banged 9-bit SPI transaction:
+bit-banged 9-bit SPI transaction.
 
-- `hardware/qualia_nv3052c.*` — expander + init sequence (runs first)
-- `hardware/lgfx_config.hpp` — LovyanGFX `Bus_RGB` + `Panel_RGB` (pixel streaming)
+Three pieces, in `displayInit()` order:
 
-`displayInit()` calls `qualiaPanelInit()` before `tft.init()`.
-
-The init sequence and all pin/timing values are transcribed from Adafruit's
-CircuitPython board + `displays/round40.py` definitions for this exact
-board+panel, so they match a known-good configuration.
+1. `hardware/qualia_nv3052c.*` — `qualiaPanelInit()`: reset + NV3052C register
+   init over the expander. Transcribed from Adafruit's CircuitPython
+   `displays/round40.py`, so it matches a known-good config.
+2. `hardware/qualia_rgb.*` — `qualiaRgbInit()`: the output stage, an **esp_lcd
+   RGB panel with two framebuffers + a bounce buffer**. Two framebuffers make
+   the swap happen on VSYNC (tear-free); the bounce buffer feeds the scanout
+   from internal SRAM so a big PSRAM blit can't starve it (flicker-free). Needs
+   IDF 5.x (see Toolchain above).
+3. `hardware/lgfx_config.hpp` — `tft` is a LovyanGFX **off-screen canvas**
+   (720×720 sprite in PSRAM). All drawing (radar, status, test pattern) targets
+   it; `displayPresent()` hands the finished frame to `qualiaRgbPresent()` which
+   calls `esp_lcd_panel_draw_bitmap` for the tear/glitch-free swap. On the C3,
+   `displayPresent()` is a no-op (its SPI panel is written live).
 
 ## Toolchain (IDF 5.x)
 
@@ -82,11 +89,14 @@ Change one thing at a time; all live in `hardware/lgfx_config.hpp`.
 
 | Symptom | Likely fix |
 |---|---|
-| **Red and blue swapped** (bar labeled RED is blue, etc.) | Swap the `pin_d0..d4` (blue) block with `pin_d11..d15` (red). Also set `config::kDisplayRgbOrder = true` so the radar palette matches. |
-| **Colors garbled / bit-reversed within a channel** | Reverse the pin order inside that channel's block (LSB↔MSB). |
-| **Image torn, shimmering, or horizontally shifted** | Flip `cfg.pclk_active_neg` (0↔1). This is the most common single fix. |
-| **Image rolls / offset vertically or horizontally** | Adjust the porch values (`hsync_*`, `vsync_*`); start from the table below. |
-| **Blank / black screen, init OK on serial** | Try lowering `cfg.freq_write` (e.g. 12 MHz); confirm PSRAM is enabled (`qio_opi`). |
+| **All colors wrong / look byte-swapped** | The canvas byte order doesn't match esp_lcd. Add `tft.setSwapBytes(true)` in `displayInit()` after `createSprite`, or feed a swapped buffer in `qualiaRgbPresent`. First thing to try if colors are off globally. |
+| **Red and blue swapped** (bar labeled RED is blue, etc.) | Swap the blue block (`kDataPins[0..4]`) with the red block (`[11..15]`) in `qualia_rgb.cpp`. Also set `config::kDisplayRgbOrder = true` so the radar palette matches. |
+| **Colors garbled / bit-reversed within a channel** | Reverse the pin order inside that channel's block in `kDataPins` (LSB↔MSB). |
+| **Image torn, shimmering, or horizontally shifted** | Flip `cfg.timings.flags.pclk_active_neg` (0↔1) in `qualia_rgb.cpp`. Most common single fix. |
+| **Image rolls / offset vertically or horizontally** | Adjust the porch values in `cfg.timings` (`hsync_*`, `vsync_*`). |
+| **Periodic flicker still present** | Increase `cfg.bounce_buffer_size_px` (e.g. `kW * 20`). |
+| **`esp_lcd_new_rgb_panel failed` on serial** | If `num_fbs = 2` + bounce is rejected, try `num_fbs = 2` with `bounce_buffer_size_px = 0`, or bounce with `num_fbs = 1`. |
+| **Blank / black screen, init OK on serial** | Lower `cfg.timings.pclk_hz` (e.g. 12 MHz); confirm PSRAM (`qio_opi`) and that the canvas allocated. |
 | **Dim or off backlight** | On this board the expander backlight bit is left as an input (panel default-on). If your panel needs it driven, drive expander bit 4 high after init. |
 
 ### Reference timings (NV3052C round 720×720)

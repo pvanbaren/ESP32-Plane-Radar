@@ -33,8 +33,10 @@ const int kCenterY = config::kDisplayHeight / 2;
 constexpr int kSpinnerDotCount = 10;
 constexpr int kSpinnerRadius = scaledPx(113);
 constexpr int kSpinnerDotRadius = scaledPx(2);
-constexpr int kSpinnerEraseRadius = scaledPx(4);
 constexpr float kSpinnerStepDeg = 6.0f;
+#if !defined(TARGET_QUALIA_S3)
+constexpr int kSpinnerEraseRadius = scaledPx(4);  // C3 live-panel incremental erase
+#endif
 
 struct SpinnerDot {
   int x = 0;
@@ -107,6 +109,7 @@ void drawTextBlock(uint16_t bg, uint16_t fg, const TextLine* lines, size_t count
     tft.drawString(lines[i].text, kCenterX, y + h / 2);
     y += h + kLineGap;
   }
+  displayPresent();
 }
 
 constexpr float kConnectingDetailVlw = 0.92f;
@@ -161,6 +164,9 @@ void drawConnectingText() {
   s_connecting_text_drawn = true;
 }
 
+#if !defined(TARGET_QUALIA_S3)
+// C3 only: the GC9A01 is a live panel, so erase the previous dots instead of
+// clearing the whole screen (which would flicker).
 void eraseSpinnerDots() {
   for (int i = 0; i < kSpinnerDotCount; ++i) {
     if (!s_spinner_dots[i].drawn) {
@@ -171,6 +177,7 @@ void eraseSpinnerDots() {
     s_spinner_dots[i].drawn = false;
   }
 }
+#endif
 
 void drawSpinnerDots() {
   constexpr float kDegToRad = 0.01745329252f;
@@ -205,18 +212,28 @@ void statusScreenConnectingBegin(const char* ssid) {
   s_connecting_text_drawn = false;
   drawConnectingText();
   drawSpinnerDots();
+  displayPresent();
 }
 
 void statusScreenConnectingTick() {
-  if (!s_connecting_text_drawn) {
-    drawConnectingText();
-  }
-  eraseSpinnerDots();
   s_spinner_angle_deg += kSpinnerStepDeg;
   if (s_spinner_angle_deg >= 270.0f) {
     s_spinner_angle_deg -= 360.0f;
   }
+#if defined(TARGET_QUALIA_S3)
+  // Ping-pong framebuffers: every frame targets a different buffer, so redraw
+  // the whole frame (drawConnectingText clears + redraws the text).
+  drawConnectingText();
   drawSpinnerDots();
+  displayPresent();
+#else
+  // Live SPI panel: update incrementally to avoid flicker.
+  if (!s_connecting_text_drawn) {
+    drawConnectingText();
+  }
+  eraseSpinnerDots();
+  drawSpinnerDots();
+#endif
 }
 
 void statusScreenPortal() {

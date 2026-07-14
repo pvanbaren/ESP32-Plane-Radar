@@ -92,6 +92,7 @@ void setup() {
   Serial.println("Display test pattern mode");
   displayInit();
   displayTestPattern();
+  displayPresent();
   return;
 #endif
 
