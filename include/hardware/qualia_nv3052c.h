@@ -15,4 +15,20 @@
  */
 bool qualiaPanelInit();
 
+#include <cstdint>
+
+// Bits returned by qualiaButtonMask().
+enum : uint8_t {
+  kQualiaBtnUp = 0x01,
+  kQualiaBtnDown = 0x02,
+};
+
+/**
+ * Read the two user buttons on the TCA9554 expander (UP = expander bit 5,
+ * DN = bit 6), returned as a kQualiaBtn* bitmask of currently-pressed buttons.
+ * Safe to call any time after qualiaPanelInit() (which starts I2C); returns 0
+ * if the expander doesn't respond. Buttons are active-low.
+ */
+uint8_t qualiaButtonMask();
+
 #endif  // TARGET_QUALIA_S3

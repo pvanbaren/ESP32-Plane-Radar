@@ -21,7 +21,11 @@ constexpr uint8_t kRegConfig = 0x03;   // direction (1 = input, 0 = output)
 constexpr uint8_t kBitClk = 1 << 0;
 constexpr uint8_t kBitCs = 1 << 1;
 constexpr uint8_t kBitReset = 1 << 2;
+constexpr uint8_t kBitBtnUp = 1 << 5;
+constexpr uint8_t kBitBtnDown = 1 << 6;
 constexpr uint8_t kBitMosi = 1 << 7;
+
+constexpr uint8_t kRegInput = 0x00;  // input port
 
 // Direction: clk/cs/reset/mosi are outputs (0), the rest inputs. 0x78 matches
 // Adafruit's proven CircuitPython bus-init for this board.
@@ -163,6 +167,23 @@ bool qualiaPanelInit() {
 
   Serial.println("NV3052C panel init sent");
   return true;
+}
+
+uint8_t qualiaButtonMask() {
+  Wire.beginTransmission(kExpanderAddr);
+  Wire.write(kRegInput);
+  if (Wire.endTransmission(false) != 0) {
+    return 0;
+  }
+  if (Wire.requestFrom(static_cast<int>(kExpanderAddr), 1) != 1) {
+    return 0;
+  }
+  const uint8_t port = Wire.read();
+  uint8_t mask = 0;
+  // Buttons are active-low (pressed pulls the input line to 0).
+  if ((port & kBitBtnUp) == 0) mask |= kQualiaBtnUp;
+  if ((port & kBitBtnDown) == 0) mask |= kQualiaBtnDown;
+  return mask;
 }
 
 #endif  // TARGET_QUALIA_S3

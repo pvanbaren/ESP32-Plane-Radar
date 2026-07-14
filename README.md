@@ -6,6 +6,8 @@
 
 Firmware for an **ESP32-C3 Super Mini** and a **1.28″ round GC9A01** display (240×240). Shows a circular **ADS-B radar** around your configured location, with **WiFiManager** for first-time setup.
 
+> **Also runs on the Adafruit Qualia ESP32-S3 RGB666** driving the 4″ round 720×720 NV3052C panel (Adafruit 5793). Build env `qualia_s3`; the UI auto-scales to 720×720 and controls use the on-board TCA9554 buttons. See **[docs/qualia_display.md](docs/qualia_display.md)**.
+
 ## What it does
 
 1. **Wi‑Fi setup** (if needed) — captive portal on AP **`PlaneRadar-Setup`**
@@ -158,7 +160,7 @@ pio run -t upload
 pio device monitor
 ```
 
-- PlatformIO env: **`supermini`**
+- PlatformIO env: **`supermini`** (ESP32-C3) or **`qualia_s3`** (Adafruit Qualia ESP32-S3; see [docs/qualia_display.md](docs/qualia_display.md))
 - Serial: **115200** baud
 - USB CDC on boot enabled in `platformio.ini` for the Super Mini
 

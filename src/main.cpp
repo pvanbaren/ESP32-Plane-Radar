@@ -7,6 +7,7 @@
 
 #include "config.h"
 #include "hardware/display.h"
+#include "hardware/qualia_nv3052c.h"
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
 #include "services/wifi_setup.h"
@@ -44,6 +45,23 @@ void onRangeTap() {
 
 void handleBootButton() {
   bootButtonPollLongPress();
+
+#if defined(TARGET_QUALIA_S3)
+  // Poll the UP button (TCA9554) for a tap → cycle range. The C3 does this via
+  // a GPIO interrupt, but the expander has no interrupt line, so edge-detect
+  // the release here with a short debounce (kBootTapMinMs).
+  static bool up_was_down = false;
+  static unsigned long up_down_ms = 0;
+  const bool up_down = (qualiaButtonMask() & kQualiaBtnUp) != 0;
+  if (up_down && !up_was_down) {
+    up_down_ms = millis();
+  } else if (!up_down && up_was_down &&
+             millis() - up_down_ms >= config::kBootTapMinMs) {
+    onRangeTap();
+  }
+  up_was_down = up_down;
+#endif
+
   if (bootButtonConsumeTap()) {
     onRangeTap();
   }
