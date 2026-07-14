@@ -56,6 +56,14 @@ constexpr bool kDisplayInvert = true;
 constexpr bool kDisplayRgbOrder = true;
 #endif
 
+// --- UI scaling ---
+// The radar UI was laid out for a 240 px display. Every pixel dimension is
+// expressed relative to that baseline and multiplied by kUiScale, so the same
+// layout fills larger panels (e.g. the 720 px Qualia, kUiScale = 3)
+// proportionally. On the 240 px build kUiScale == 1 and nothing changes.
+constexpr int kUiBaseSize = 240;
+constexpr float kUiScale = static_cast<float>(kDisplayWidth) / kUiBaseSize;
+
 // --- Radar center defaults (overridden via WiFi setup portal) ---
 constexpr double kDefaultRadarLat = 52.3676;
 constexpr double kDefaultRadarLon = 4.9041;

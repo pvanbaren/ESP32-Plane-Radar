@@ -89,9 +89,27 @@ Change one thing at a time; all live in `hardware/lgfx_config.hpp`.
 | 6 | Button DOWN | in |
 | 7 | TFT MOSI | out |
 
-## Once the panel is verified
+## Radar UI scaling (Phase 3)
 
-Remove `-DDISPLAY_TEST_PATTERN` from `env:qualia_s3` to build the full radar
-app. Note that the radar UI is still sized for 240×240 (Phase 3): geometry will
-be centered but small, and the range/reset controls still target the C3 BOOT
-button (GPIO 9) rather than the Qualia's expander buttons (Phase 4).
+The full radar app is now the default build (`-DDISPLAY_TEST_PATTERN` is
+commented out). The UI scales from its original 240 px layout to the panel size
+via `config::kUiScale` (= `kDisplayWidth / 240`, so 3× at 720 px):
+
+- **Geometry** — all pixel dimensions in `ui/radar_theme.h` go through
+  `scaledPx()`/`scaledPxF()`; rings, symbols, stroke widths, and label spacing
+  scale proportionally. The 240 px (C3) build is unchanged (`kUiScale == 1`).
+- **Status screens** — `ui/status_screens.cpp` scales its spinner/layout px and
+  VLW font sizes the same way.
+- **Fonts** — the embedded VLW (`data/ui_font.vlw`, ~15 px native) is *upscaled*
+  to hit the larger targets. It stays readable but is somewhat soft at 720 px,
+  especially large status-screen titles (~3.4× upscale). For crisp text,
+  regenerate `ui_font.vlw` at a larger native size (~45 px) — the adaptive radar
+  labels need no code change; the fixed status-screen multipliers would be
+  re-based. This is a pending polish item.
+
+### Known limitations (Phase 4 TODO)
+
+- Physical controls (range cycle, Wi-Fi reset) are **disabled** on the Qualia:
+  the C3 used the BOOT button on GPIO 9, which is an RGB data line here. Input
+  moves to the TCA9554 buttons (UP = bit 5, DN = bit 6). Range still defaults
+  and persists via NVS; it just can't be changed from the device yet.

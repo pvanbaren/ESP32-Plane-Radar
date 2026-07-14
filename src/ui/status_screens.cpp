@@ -16,14 +16,21 @@
 
 namespace {
 
-constexpr int kLineGap = 6;
+// Pixel dimensions and VLW font sizes here are authored for a 240 px display
+// and scaled to the active panel via config::kUiScale (see config.h).
+constexpr int scaledPx(int px240) {
+  return static_cast<int>(px240 * config::kUiScale + 0.5f);
+}
+constexpr float scaledVlw(float base240) { return base240 * config::kUiScale; }
+
+constexpr int kLineGap = scaledPx(6);
 const int kCenterX = config::kDisplayWidth / 2;
 const int kCenterY = config::kDisplayHeight / 2;
 
 constexpr int kSpinnerDotCount = 10;
-constexpr int kSpinnerRadius = 113;
-constexpr int kSpinnerDotRadius = 2;
-constexpr int kSpinnerEraseRadius = 4;
+constexpr int kSpinnerRadius = scaledPx(113);
+constexpr int kSpinnerDotRadius = scaledPx(2);
+constexpr int kSpinnerEraseRadius = scaledPx(4);
 constexpr float kSpinnerStepDeg = 6.0f;
 
 struct SpinnerDot {
@@ -34,7 +41,7 @@ struct SpinnerDot {
 
 char s_connecting_ssid[33];
 char s_ssid_line[33];
-constexpr int kConnectingTextMaxWidthPx = 220;
+constexpr int kConnectingTextMaxWidthPx = scaledPx(220);
 float s_spinner_angle_deg = -90.0f;
 SpinnerDot s_spinner_dots[kSpinnerDotCount];
 bool s_connecting_text_drawn = false;
@@ -65,7 +72,7 @@ int lineHeightVlw(float size) {
 
 void applyLineStyle(const TextLine& line) {
   if (displayFontIsSmooth()) {
-    displayFontSetSmoothSize(tft, line.vlw_size);
+    displayFontSetSmoothSize(tft, scaledVlw(line.vlw_size));
   } else {
     displayFontSetBitmap(tft, line.gfx_font);
   }
@@ -79,7 +86,7 @@ void drawTextBlock(uint16_t bg, uint16_t fg, const TextLine* lines, size_t count
   int total_h = 0;
   for (size_t i = 0; i < count; ++i) {
     if (displayFontIsSmooth()) {
-      total_h += lineHeightVlw(lines[i].vlw_size);
+      total_h += lineHeightVlw(scaledVlw(lines[i].vlw_size));
     } else {
       total_h += lineHeightGfx(lines[i].gfx_font);
     }
@@ -92,7 +99,7 @@ void drawTextBlock(uint16_t bg, uint16_t fg, const TextLine* lines, size_t count
   for (size_t i = 0; i < count; ++i) {
     applyLineStyle(lines[i]);
     const int h =
-        displayFontIsSmooth() ? lineHeightVlw(lines[i].vlw_size)
+        displayFontIsSmooth() ? lineHeightVlw(scaledVlw(lines[i].vlw_size))
                               : lineHeightGfx(lines[i].gfx_font);
     tft.drawString(lines[i].text, kCenterX, y + h / 2);
     y += h + kLineGap;
@@ -103,7 +110,7 @@ constexpr float kConnectingDetailVlw = 0.92f;
 
 void applyConnectingDetailStyle() {
   if (displayFontIsSmooth()) {
-    displayFontSetSmoothSize(tft, kConnectingDetailVlw);
+    displayFontSetSmoothSize(tft, scaledVlw(kConnectingDetailVlw));
   } else {
     displayFontSetBitmap(tft, &kConnectingGfxDetail);
   }
@@ -139,7 +146,7 @@ void drawConnectingText() {
   const int detail_h = tft.fontHeight();
   const int total_h = detail_h * 2 + kLineGap;
   const int block_top = (config::kDisplayHeight - total_h) / 2;
-  constexpr int kPanelPadY = 8;
+  const int kPanelPadY = scaledPx(8);
   tft.fillRect(kCenterX - kConnectingTextMaxWidthPx / 2, block_top - kPanelPadY,
                kConnectingTextMaxWidthPx, total_h + kPanelPadY * 2, config::kColorBlack);
 
