@@ -76,9 +76,10 @@ int measureVlwHeight(float size) {
 }
 
 float findVlwSizeForHeight(int target_px) {
-  float lo = 0.25f;
-  // Upper bound must exceed the largest scaled target: on the 720 px build the
-  // cardinal cap height is ~42 px, which needs a VLW size around 1.7.
+  // The embedded VLW is 45 px native, so sizes are well below 1.0 in practice
+  // (e.g. ~0.9 for a 42 px cap height at 720, ~0.24 for an 11 px label at 240).
+  // Keep the bracket wide enough to cover both builds.
+  float lo = 0.12f;
   float hi = 3.5f;
   for (int i = 0; i < 16; ++i) {
     const float mid = (lo + hi) * 0.5f;

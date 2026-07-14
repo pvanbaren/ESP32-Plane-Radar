@@ -64,6 +64,13 @@ constexpr bool kDisplayRgbOrder = true;
 constexpr int kUiBaseSize = 240;
 constexpr float kUiScale = static_cast<float>(kDisplayWidth) / kUiBaseSize;
 
+// The embedded VLW (data/ui_font.vlw) is rendered at 45 px native — 3× the
+// 15 px font the original layout was tuned against. Fixed VLW size multipliers
+// (e.g. status screens) divide by this so glyphs keep their intended on-screen
+// size; the font is only ever downscaled (crisp). Adaptive text that searches
+// by target pixel height needs no adjustment.
+constexpr float kVlwNativeSizeScale = 45.0f / 15.0f;
+
 // --- Radar center defaults (overridden via WiFi setup portal) ---
 constexpr double kDefaultRadarLat = 52.3676;
 constexpr double kDefaultRadarLon = 4.9041;
