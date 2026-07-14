@@ -28,6 +28,7 @@ constexpr unsigned long kRequestTimeoutMs = 10000;
 
 Aircraft s_aircraft[kMaxAircraft];
 size_t s_aircraft_count = 0;
+unsigned long s_last_update_ms = 0;
 PollFn s_poll_fn = nullptr;
 
 void pollNetwork() {
@@ -213,6 +214,8 @@ size_t aircraftCount() { return s_aircraft_count; }
 
 const Aircraft* aircraftList() { return s_aircraft; }
 
+unsigned long lastUpdateMs() { return s_last_update_ms; }
+
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   const float dist_nm = kmToNauticalMiles(fetch_radius_km);
 
@@ -255,6 +258,9 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
     return false;
   }
+
+  // Base time for dead-reckoning: the fetched positions are valid as of now.
+  s_last_update_ms = millis();
 
   JsonArray ac = doc["ac"].as<JsonArray>();
   if (ac.isNull()) {

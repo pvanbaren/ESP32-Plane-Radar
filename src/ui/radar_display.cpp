@@ -1,5 +1,6 @@
 #include "ui/radar_display.h"
 
+#include <Arduino.h>
 #include <lgfx/v1/lgfx_fonts.hpp>
 
 #include <algorithm>
@@ -216,6 +217,30 @@ void offsetKmFromCenter(float lat, float lon, float* dx_km, float* dy_km,
   *dy_km =
       static_cast<float>(lat - services::location::lat()) * kKmPerDeg;
   *dist_km = sqrtf((*dx_km) * (*dx_km) + (*dy_km) * (*dy_km));
+}
+
+/**
+ * Dead-reckon an aircraft's position from its last-fetched fix along its ground
+ * track, so it moves smoothly between ADS-B updates. Uses the same flat
+ * 1° ≈ 111 km projection as offsetKmFromCenter(), so it round-trips exactly.
+ */
+void extrapolatedLatLon(const services::adsb::Aircraft& plane, float* lat,
+                        float* lon) {
+  *lat = plane.lat;
+  *lon = plane.lon;
+  const unsigned long base_ms = services::adsb::lastUpdateMs();
+  if (base_ms == 0 || plane.gs_knots <= 0.0f) {
+    return;
+  }
+  const float elapsed_h = static_cast<float>(millis() - base_ms) / 3600000.0f;
+  const float dist_km = plane.gs_knots * 1.852f * elapsed_h;  // knots -> km
+  if (dist_km <= 0.0f) {
+    return;
+  }
+  constexpr float kDegToRad = 0.01745329252f;
+  const float rad = plane.track_deg * kDegToRad;  // track: 0 = N, 90 = E
+  *lat = plane.lat + (dist_km * cosf(rad)) / kKmPerDeg;
+  *lon = plane.lon + (dist_km * sinf(rad)) / kKmPerDeg;
 }
 
 float innerRingMaxKm() {
@@ -502,15 +527,20 @@ void drawAircraft() {
   size_t dot_count = 0;
 
   for (size_t i = 0; i < n; ++i) {
+    // Dead-reckoned position for smooth motion between fetches.
+    float lat = 0.0f;
+    float lon = 0.0f;
+    extrapolatedLatLon(planes[i], &lat, &lon);
+
     float dx_km = 0.0f;
     float dy_km = 0.0f;
     float dist_km = 0.0f;
-    offsetKmFromCenter(planes[i].lat, planes[i].lon, &dx_km, &dy_km, &dist_km);
+    offsetKmFromCenter(lat, lon, &dx_km, &dy_km, &dist_km);
 
     if (isInsideOuterRingKm(dist_km)) {
       int x = 0;
       int y = 0;
-      latLonToScreen(planes[i].lat, planes[i].lon, &x, &y);
+      latLonToScreen(lat, lon, &x, &y);
       items[draw_count].index = i;
       items[draw_count].x = x;
       items[draw_count].y = y;
@@ -521,8 +551,7 @@ void drawAircraft() {
 
     int dot_x = 0;
     int dot_y = 0;
-    if (!beyondRingEdgeDotFromLatLon(planes[i].lat, planes[i].lon, &dot_x,
-                                     &dot_y)) {
+    if (!beyondRingEdgeDotFromLatLon(lat, lon, &dot_x, &dot_y)) {
       continue;
     }
     dots[dot_count].x = dot_x;

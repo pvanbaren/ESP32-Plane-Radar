@@ -20,6 +20,13 @@ constexpr size_t kMaxAircraft = 64;
 size_t aircraftCount();
 const Aircraft* aircraftList();
 
+/**
+ * millis() timestamp of the last successful fetch (0 before the first). The
+ * stored lat/lon are the values as of this time; callers can dead-reckon
+ * newer positions from track_deg/gs_knots and the elapsed time.
+ */
+unsigned long lastUpdateMs();
+
 /** Hook invoked during long HTTP I/O (e.g. wifiLoop). Optional. */
 using PollFn = void (*)();
 void setPollFn(PollFn fn);

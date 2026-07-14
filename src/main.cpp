@@ -21,6 +21,7 @@ bool g_radar_visible = false;
 unsigned long g_wifi_down_since = 0;
 unsigned long g_last_reconnect_ms = 0;
 unsigned long g_last_adsb_fetch_ms = 0;
+unsigned long g_last_redraw_ms = 0;
 #if defined(TARGET_QUALIA_S3)
 bool g_status_visible = false;
 unsigned long g_status_shown_ms = 0;
@@ -185,8 +186,14 @@ void loop() {
     if (!g_radar_visible) {
       showRadarIfConnected();
     } else if (millis() - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
+      // Refresh aircraft data from adsb.fi (~every 3 s); also redraws.
       g_last_adsb_fetch_ms = millis();
       fetchAndDrawAircraft();
+      g_last_redraw_ms = millis();
+    } else if (millis() - g_last_redraw_ms >= config::kRadarRedrawIntervalMs) {
+      // Between fetches, redraw at 2 Hz with dead-reckoned positions.
+      g_last_redraw_ms = millis();
+      ui::radarDisplayRefreshAircraft();
     }
   }
 
