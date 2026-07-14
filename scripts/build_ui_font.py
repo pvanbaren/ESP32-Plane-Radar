@@ -10,7 +10,7 @@ Charset: ASCII 33..126 plus U+00B0 (degree sign) — 95 glyphs, matching the
 original font. Space (0x20) is intentionally omitted (LovyanGFX derives it).
 
 Usage:
-    python scripts/build_ui_font.py NotoSans-Bold.ttf [-o data/ui_font.vlw]
+    python scripts/build_ui_font.py NotoSans-Regular.ttf [-o data/ui_font.vlw]
 
 Requires Pillow (PIL) with FreeType support.
 """
@@ -66,7 +66,7 @@ def build(ttf_path: str) -> bytes:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("ttf", help="path to a bold TrueType font (e.g. NotoSans-Bold.ttf)")
+    ap.add_argument("ttf", help="path to a TrueType font (e.g. NotoSans-Regular.ttf)")
     ap.add_argument("-o", "--out", default="data/ui_font.vlw")
     args = ap.parse_args()
     data = build(args.ttf)

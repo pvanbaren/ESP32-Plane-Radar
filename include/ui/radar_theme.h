@@ -14,6 +14,11 @@ constexpr int scaledPx(int px240) {
 }
 constexpr float scaledPxF(float px240) { return px240 * config::kUiScale; }
 
+// Text cap-height targets: panel scale plus the global font-size multiplier.
+constexpr int fontPx(int px240) {
+  return static_cast<int>(px240 * config::kUiScale * config::kUiFontScale + 0.5f);
+}
+
 constexpr int kSize = config::kDisplayWidth;
 constexpr int kCenterX = kSize / 2;
 constexpr int kCenterY = kSize / 2;
@@ -30,9 +35,9 @@ constexpr int kCardinalSouthOffsetY = scaledPx(3);
 constexpr int kScaleGapFromOuterRing = scaledPx(6);
 
 /** Target cap height (px) for N/S/E/W. */
-constexpr int kCardinalLabelHeightPx = scaledPx(14);
+constexpr int kCardinalLabelHeightPx = fontPx(14);
 /** Scale label is this many px shorter than cardinals. */
-constexpr int kScaleBelowCardinalPx = scaledPx(3);
+constexpr int kScaleBelowCardinalPx = fontPx(3);
 
 constexpr int kRingCount = 4;
 
@@ -72,8 +77,8 @@ constexpr int kAircraftInsideRingInsetPx =
 /** Beyond-ring traffic: bearing cues on screen rim (correct direction, fixed radius). */
 constexpr int kBeyondRingDotRadiusPx = scaledPx(4);
 constexpr int kBeyondRingScreenMarginPx = scaledPx(2);
-/** Target cap height (px) for aircraft tags (bold, slightly above scale label). */
-constexpr int kAircraftTagLabelHeightPx = scaledPx(13);
+/** Target cap height (px) for aircraft tags (slightly above scale label). */
+constexpr int kAircraftTagLabelHeightPx = fontPx(13);
 
 /** RGB565 palette targets (applied in initPalette). */
 constexpr uint8_t kBgR = 4;
