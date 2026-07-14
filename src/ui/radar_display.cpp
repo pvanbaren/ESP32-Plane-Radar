@@ -242,10 +242,13 @@ void extrapolatedLatLon(const services::adsb::Aircraft& plane,
   *lon = plane.lon + (dist_km * sinf(rad)) / kKmPerDeg;
 }
 
-float innerRingMaxKm() {
+float onScreenMaxKm() {
   const float outer_km = radar::rangeCurrent().outer_km;
-  return outer_km * (static_cast<float>(radar::kGridOuterRadius -
-                                       radar::kAircraftInsideRingInsetPx) /
+  // Draw the aircraft symbol as long as it maps onto the round screen (out to
+  // the rim, same radius as the beyond-ring dots); only past the edge does it
+  // become a rim dot.
+  const int max_r_px = radar::kCenterX - radar::kBeyondRingScreenMarginPx;
+  return outer_km * (static_cast<float>(max_r_px) /
                      static_cast<float>(radar::kGridOuterRadius));
 }
 
@@ -263,17 +266,12 @@ void latLonToScreen(float lat, float lon, int* out_x, int* out_y) {
   *out_y = radar::kCenterY - static_cast<int>(lroundf(dy_km * px_per_km));
 }
 
-bool isInsideOuterRingKm(float dist_km) { return dist_km <= innerRingMaxKm(); }
+bool isOnScreenKm(float dist_km) { return dist_km <= onScreenMaxKm(); }
 
 int distSqFromCenter(int x, int y) {
   const int dx = x - radar::kCenterX;
   const int dy = y - radar::kCenterY;
   return dx * dx + dy * dy;
-}
-
-bool isInsideOuterRing(int x, int y) {
-  const int max_r = radar::kGridOuterRadius - radar::kAircraftInsideRingInsetPx;
-  return distSqFromCenter(x, y) <= max_r * max_r;
 }
 
 /** Rim dot from true bearing; always on screen edge (even if target is 50+ km away). */
@@ -285,7 +283,7 @@ bool beyondRingEdgeDotFromLatLon(float lat, float lon, int* out_x, int* out_y) {
   if (dist_km < 0.01f) {
     return false;
   }
-  if (isInsideOuterRingKm(dist_km)) {
+  if (isOnScreenKm(dist_km)) {
     return false;
   }
 
@@ -304,8 +302,8 @@ void drawBeyondRingDot(int x, int y) {
                            radar::kColorAircraft);
 }
 
-void clipPointToOuterRing(int x0, int y0, int* x1, int* y1) {
-  const int max_r = radar::kGridOuterRadius;
+void clipToScreenEdge(int x0, int y0, int* x1, int* y1) {
+  const int max_r = radar::kCenterX - radar::kBeyondRingScreenMarginPx;
   const int max_r_sq = max_r * max_r;
   if (distSqFromCenter(*x1, *y1) <= max_r_sq) {
     return;
@@ -394,7 +392,7 @@ void drawSpeedVector(int cx, int cy, float heading_deg, float track_deg,
   const float rad = track_deg * kDegToRad;
   int ex = tip_x + static_cast<int>(lroundf(sinf(rad) * len));
   int ey = tip_y - static_cast<int>(lroundf(cosf(rad) * len));
-  clipPointToOuterRing(tip_x, tip_y, &ex, &ey);
+  clipToScreenEdge(tip_x, tip_y, &ex, &ey);
   if (ex == tip_x && ey == tip_y) {
     return;
   }
@@ -539,7 +537,7 @@ void drawAircraft() {
     float dist_km = 0.0f;
     offsetKmFromCenter(lat, lon, &dx_km, &dy_km, &dist_km);
 
-    if (isInsideOuterRingKm(dist_km)) {
+    if (isOnScreenKm(dist_km)) {
       int x = 0;
       int y = 0;
       latLonToScreen(lat, lon, &x, &y);
