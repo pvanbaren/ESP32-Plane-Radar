@@ -158,7 +158,8 @@ controls use the two **TCA9554 buttons** instead (polled over I²C, active-low):
 
 | Button | Gesture | Effect |
 |--------|---------|--------|
-| **UP** (expander bit 5) | tap | Cycle range preset (5 → 10 → 15 → 25 km) |
+| **UP** (expander bit 5) | tap | Range up (next larger preset) |
+| **DN** (expander bit 6) | tap | Range down (next smaller preset) |
 | **DN** (expander bit 6) | hold 3 s | Clear Wi-Fi / location / units, reboot to setup |
 
 If your board doesn't populate these buttons, the controls simply never

@@ -5,6 +5,8 @@
 #include <Arduino.h>
 #include <Wire.h>
 
+#include "config.h"
+
 namespace {
 
 // --- TCA9554 I2C expander (Qualia default address) ---
@@ -185,5 +187,74 @@ uint8_t qualiaButtonMask() {
   if ((port & kBitBtnDown) == 0) mask |= kQualiaBtnDown;
   return mask;
 }
+
+// --- Background button polling (latches edges the blocked main loop misses) ---
+namespace {
+
+portMUX_TYPE s_btn_mux = portMUX_INITIALIZER_UNLOCKED;
+volatile bool s_up_tap = false;
+volatile bool s_dn_tap = false;
+volatile bool s_reset_req = false;
+
+bool consume(volatile bool& flag) {
+  portENTER_CRITICAL(&s_btn_mux);
+  const bool v = flag;
+  flag = false;
+  portEXIT_CRITICAL(&s_btn_mux);
+  return v;
+}
+
+void latch(volatile bool& flag) {
+  portENTER_CRITICAL(&s_btn_mux);
+  flag = true;
+  portEXIT_CRITICAL(&s_btn_mux);
+}
+
+void buttonTask(void*) {
+  bool up_prev = false, dn_prev = false;
+  unsigned long up_down_ms = 0, dn_down_ms = 0;
+  bool dn_hold_fired = false;
+  for (;;) {
+    const uint8_t mask = qualiaButtonMask();
+    const unsigned long now = millis();
+
+    const bool up = (mask & kQualiaBtnUp) != 0;
+    if (up && !up_prev) {
+      up_down_ms = now;
+    } else if (!up && up_prev && now - up_down_ms >= config::kBootTapMinMs) {
+      latch(s_up_tap);
+    }
+    up_prev = up;
+
+    const bool dn = (mask & kQualiaBtnDown) != 0;
+    if (dn && !dn_prev) {
+      dn_down_ms = now;
+      dn_hold_fired = false;
+    } else if (dn && dn_prev && !dn_hold_fired &&
+               now - dn_down_ms >= config::kBootResetHoldMs) {
+      dn_hold_fired = true;  // hold -> Wi-Fi reset (once per press)
+      latch(s_reset_req);
+    } else if (!dn && dn_prev && !dn_hold_fired) {
+      const unsigned long held = now - dn_down_ms;
+      if (held >= config::kBootTapMinMs && held < config::kBootResetHoldMs) {
+        latch(s_dn_tap);
+      }
+    }
+    dn_prev = dn;
+
+    vTaskDelay(pdMS_TO_TICKS(15));
+  }
+}
+
+}  // namespace
+
+void qualiaButtonsStart() {
+  xTaskCreatePinnedToCore(buttonTask, "qualia_btn", 4096, nullptr, 1, nullptr,
+                          0);
+}
+
+bool qualiaConsumeUpTap() { return consume(s_up_tap); }
+bool qualiaConsumeDownTap() { return consume(s_dn_tap); }
+bool qualiaConsumeResetRequest() { return consume(s_reset_req); }
 
 #endif  // TARGET_QUALIA_S3

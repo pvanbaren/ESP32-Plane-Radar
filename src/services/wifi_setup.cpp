@@ -371,9 +371,9 @@ bool wifiShowsSetupScreenOnBoot() {
 
 bool wifiBootButtonPressed() {
 #if defined(TARGET_QUALIA_S3)
-  // DN button (TCA9554) drives the hold-to-reset gesture; the existing
-  // poll-based long-press logic handles it exactly like the C3 BOOT button.
-  return (qualiaButtonMask() & kQualiaBtnDown) != 0;
+  // The background button task owns the expander; the DN hold-to-reset is
+  // delivered via qualiaConsumeResetRequest() in bootButtonPollLongPress().
+  return false;
 #else
   return digitalRead(config::kBootPin) == LOW;
 #endif
@@ -392,6 +392,15 @@ bool bootButtonConsumeTap() {
 }
 
 void bootButtonPollLongPress() {
+#if defined(TARGET_QUALIA_S3)
+  // The DN hold is detected by the background button task; consume it here so
+  // the reset fires whether we're in the main loop or a Wi-Fi setup loop.
+  if (qualiaConsumeResetRequest()) {
+    Serial.println("DN held — resetting WiFi");
+    wifiResetCredentialsAndReboot();
+  }
+  return;
+#else
   if (wifiBootButtonPressed()) {
     portENTER_CRITICAL(&s_boot_mux);
     if (!s_boot_is_down) {
@@ -413,6 +422,7 @@ void bootButtonPollLongPress() {
     portEXIT_CRITICAL(&s_boot_mux);
     s_long_press_handled = false;
   }
+#endif  // TARGET_QUALIA_S3
 }
 
 void wifiResetCredentialsAndReboot() {
