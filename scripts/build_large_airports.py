@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build runway dataset from OurAirports (large_airport only)."""
+"""Build runway dataset from OurAirports (large + medium airports)."""
 
 from __future__ import annotations
 
@@ -20,6 +20,9 @@ RUNWAYS_URL = (
     "https://raw.githubusercontent.com/davidmegginson/ourairports-data/main/"
     "runways.csv"
 )
+
+# OurAirports "type" values to include. "medium_airport" covers regional fields.
+INCLUDED_TYPES = frozenset({"large_airport", "medium_airport"})
 
 def fetch_csv(url: str) -> list[dict[str, str]]:
     with urllib.request.urlopen(url, timeout=60) as resp:
@@ -65,9 +68,9 @@ def build_dataset() -> tuple[
     airports = fetch_csv(AIRPORTS_URL)
     runways = fetch_csv(RUNWAYS_URL)
 
-    large_idents: dict[str, tuple[int, int]] = {}
+    included_idents: dict[str, tuple[int, int]] = {}
     for a in airports:
-        if a.get("type") != "large_airport":
+        if a.get("type") not in INCLUDED_TYPES:
             continue
         ident = (a.get("ident") or "").strip()
         if len(ident) != 4:
@@ -76,10 +79,10 @@ def build_dataset() -> tuple[
         lon = coord_e7(a.get("longitude_deg"))
         if lat is None or lon is None:
             continue
-        large_idents[ident] = (lat, lon)
+        included_idents[ident] = (lat, lon)
 
     airport_rows = sorted(
-        (ident, lat, lon) for ident, (lat, lon) in large_idents.items()
+        (ident, lat, lon) for ident, (lat, lon) in included_idents.items()
     )
     airport_index = {ident: idx for idx, (ident, _, _) in enumerate(airport_rows)}
 
