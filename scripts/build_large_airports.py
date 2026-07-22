@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Build runway dataset from OurAirports (large + medium airports)."""
+"""Build runway dataset from OurAirports.
+
+Large + medium airports are included globally. Small airports are included only
+within a fixed radius of KGRR (Gerald R. Ford Intl, Grand Rapids, MI) to keep
+the dataset — and the runtime nearby pre-filter — a manageable size.
+"""
 
 from __future__ import annotations
 
 import csv
 import io
+import math
 import urllib.request
 from pathlib import Path
 
@@ -21,8 +27,32 @@ RUNWAYS_URL = (
     "runways.csv"
 )
 
-# OurAirports "type" values to include. "medium_airport" covers regional fields.
+# OurAirports "type" values included globally. "medium_airport" covers regional
+# fields; small airports are handled separately (see SMALL_TYPE / SMALL_*).
 INCLUDED_TYPES = frozenset({"large_airport", "medium_airport"})
+
+# Small airports are included only within SMALL_RADIUS_MI of this reference
+# airport. Its coordinates are looked up from the dataset at build time.
+SMALL_TYPE = "small_airport"
+SMALL_REF_IDENT = "KGRR"
+SMALL_RADIUS_MI = 100.0
+MI_TO_KM = 1.609344
+EARTH_RADIUS_KM = 6371.0
+
+# Longest identifier we store (see Airport.ident[] width in the header).
+MAX_IDENT_LEN = 7
+
+
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    rlat1 = math.radians(lat1)
+    rlat2 = math.radians(lat2)
+    dlat = rlat2 - rlat1
+    dlon = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlon / 2) ** 2
+    )
+    return 2.0 * EARTH_RADIUS_KM * math.asin(math.sqrt(a))
 
 def fetch_csv(url: str) -> list[dict[str, str]]:
     with urllib.request.urlopen(url, timeout=60) as resp:
@@ -68,12 +98,37 @@ def build_dataset() -> tuple[
     airports = fetch_csv(AIRPORTS_URL)
     runways = fetch_csv(RUNWAYS_URL)
 
+    # Reference point for the small-airport radius filter.
+    ref_lat = ref_lon = None
+    for a in airports:
+        if (a.get("ident") or "").strip() == SMALL_REF_IDENT:
+            ref_lat = float(a["latitude_deg"])
+            ref_lon = float(a["longitude_deg"])
+            break
+    if ref_lat is None:
+        raise SystemExit(f"reference airport {SMALL_REF_IDENT} not found in dataset")
+    small_radius_km = SMALL_RADIUS_MI * MI_TO_KM
+
     included_idents: dict[str, tuple[int, int]] = {}
     for a in airports:
-        if a.get("type") not in INCLUDED_TYPES:
+        atype = a.get("type")
+        is_small = atype == SMALL_TYPE
+        if atype not in INCLUDED_TYPES and not is_small:
             continue
         ident = (a.get("ident") or "").strip()
-        if len(ident) != 4:
+        # Large/medium keep the original 4-char ICAO requirement; small airports
+        # (KGRR-local) allow the shorter/local codes OurAirports assigns them.
+        if is_small:
+            if not (1 <= len(ident) <= MAX_IDENT_LEN):
+                continue
+        elif len(ident) != 4:
+            continue
+        try:
+            lat_deg = float(a["latitude_deg"])
+            lon_deg = float(a["longitude_deg"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if is_small and haversine_km(ref_lat, ref_lon, lat_deg, lon_deg) > small_radius_km:
             continue
         lat = coord_e7(a.get("latitude_deg"))
         lon = coord_e7(a.get("longitude_deg"))
@@ -135,7 +190,7 @@ def render_header(airport_count: int, segment_count: int) -> str:
             "namespace data::large_airports {",
             "",
             "struct Airport {",
-            "  char ident[5];",
+            "  char ident[8];",
             "  int32_t lat_e7;",
             "  int32_t lon_e7;",
             "};",

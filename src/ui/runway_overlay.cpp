@@ -20,8 +20,25 @@ namespace {
 constexpr float kKmPerDeg = 111.0f;
 constexpr size_t kMaxAirportLabels = 32;
 
+// Coarse pre-filter radius: airports farther than this from the radar center are
+// never candidates for drawing. Comfortably larger than the widest range preset
+// (45 mi ≈ 66 mi fetch radius), so nothing drawable is ever excluded.
+constexpr float kNearbyRadiusKm = 100.0f * 1.609344f;
+
 bool s_in_range[data::large_airports::kAirportCount];
 bool s_label_pending[data::large_airports::kAirportCount];
+
+// Airports/runways within kNearbyRadiusKm of the radar center. Rebuilt only when
+// the radar location changes (see rebuildNearbyIfLocationChanged); the per-frame
+// draw loop iterates these instead of the full global dataset.
+uint16_t s_nearby_airports[data::large_airports::kAirportCount];
+size_t s_nearby_airport_count = 0;
+bool s_nearby_flag[data::large_airports::kAirportCount];
+uint16_t s_nearby_runways[data::large_airports::kRunwayCount];
+size_t s_nearby_runway_count = 0;
+bool s_nearby_built = false;
+double s_built_lat = 0.0;
+double s_built_lon = 0.0;
 
 bool s_runway_label_ready = false;
 bool s_runway_label_use_vlw = false;
@@ -244,6 +261,44 @@ void drawAirportLabel(lgfx::LGFXBase& gfx,
   drawBoldRunwayLabel(gfx, ap.ident, lx, ly);
 }
 
+// Rebuilds the nearby airport/runway index lists when the radar location has
+// changed (or on first use). This is the coarse pre-filter: an O(airports +
+// runways) pass that runs only on a location change, so the per-frame draw loop
+// iterates a small local subset instead of the full global dataset.
+void rebuildNearbyIfLocationChanged() {
+  const double lat = services::location::lat();
+  const double lon = services::location::lon();
+  if (s_nearby_built && lat == s_built_lat && lon == s_built_lon) {
+    return;
+  }
+
+  s_nearby_airport_count = 0;
+  for (size_t i = 0; i < data::large_airports::kAirportCount; ++i) {
+    const auto& ap = data::large_airports::kAirports[i];
+    float dx_km = 0.0f;
+    float dy_km = 0.0f;
+    float dist_km = 0.0f;
+    offsetKmFromCenter(e7ToDeg(ap.lat_e7), e7ToDeg(ap.lon_e7), &dx_km, &dy_km,
+                       &dist_km);
+    const bool nearby = dist_km <= kNearbyRadiusKm;
+    s_nearby_flag[i] = nearby;
+    if (nearby) {
+      s_nearby_airports[s_nearby_airport_count++] = static_cast<uint16_t>(i);
+    }
+  }
+
+  s_nearby_runway_count = 0;
+  for (size_t i = 0; i < data::large_airports::kRunwayCount; ++i) {
+    if (s_nearby_flag[data::large_airports::kRunways[i].airport_idx]) {
+      s_nearby_runways[s_nearby_runway_count++] = static_cast<uint16_t>(i);
+    }
+  }
+
+  s_built_lat = lat;
+  s_built_lon = lon;
+  s_nearby_built = true;
+}
+
 }  // namespace
 
 void drawLargeAirportRunways(lgfx::LGFXBase& gfx) {
@@ -251,18 +306,21 @@ void drawLargeAirportRunways(lgfx::LGFXBase& gfx) {
     return;
   }
   displayFontEnsureLoaded(gfx);
+  rebuildNearbyIfLocationChanged();
   const float radius_km = radar::fetchRadiusKm();
 
   uint16_t label_airports[kMaxAirportLabels];
   size_t label_count = 0;
 
-  for (size_t i = 0; i < data::large_airports::kAirportCount; ++i) {
-    s_in_range[i] = false;
-    s_label_pending[i] = false;
+  // Reset per-frame flags for the nearby airports only (not the full dataset).
+  for (size_t i = 0; i < s_nearby_airport_count; ++i) {
+    const uint16_t ap_idx = s_nearby_airports[i];
+    s_in_range[ap_idx] = false;
+    s_label_pending[ap_idx] = false;
   }
 
-  for (size_t i = 0; i < data::large_airports::kRunwayCount; ++i) {
-    const auto& rw = data::large_airports::kRunways[i];
+  for (size_t i = 0; i < s_nearby_runway_count; ++i) {
+    const auto& rw = data::large_airports::kRunways[s_nearby_runways[i]];
     const uint16_t ap_idx = rw.airport_idx;
     if (!s_in_range[ap_idx]) {
       const auto& ap = data::large_airports::kAirports[ap_idx];
