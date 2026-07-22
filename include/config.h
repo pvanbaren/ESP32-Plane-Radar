@@ -76,8 +76,10 @@ constexpr float kVlwNativeSizeScale = 45.0f / 15.0f;
 constexpr float kUiFontScale = 0.5f;
 
 // --- Radar center defaults (overridden via WiFi setup portal) ---
-constexpr double kDefaultRadarLat = 52.3676;
-constexpr double kDefaultRadarLon = 4.9041;
+// KGRR — Gerald R. Ford International (Grand Rapids, MI). The small-airport
+// dataset is filtered to within 100 mi of KGRR, so the default center matches.
+constexpr double kDefaultRadarLat = 42.8808;
+constexpr double kDefaultRadarLon = -85.5228;
 
 /** Poll adsb.fi (API public limit: 1 req/s). */
 constexpr unsigned long kAdsbFetchIntervalMs = 5000;

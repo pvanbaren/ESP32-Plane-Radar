@@ -76,9 +76,10 @@ Preset and miles/km choice persist across reboot (`planeradar` NVS namespace).
 
 ### Runways
 
-- Major airports from OurAirports (`large_airport`); all open runway strips in range (helipads excluded)
-- Teal runway lines with one ICAO label per airport (e.g. `KJFK`); toggle in the Wi‑Fi setup portal
-- Update the embedded list: `python3 scripts/build_large_airports.py`
+- Large + medium airports from OurAirports globally; small airports within 100 mi of KGRR (Grand Rapids, MI). All open runway strips in range (helipads excluded)
+- Teal runway lines with one label per airport (e.g. `KJFK`); toggle in the Wi‑Fi setup portal
+- Draw loop pre-filters the dataset to airports within 100 mi of the radar center (rebuilt only when the location changes), then iterates that subset each frame
+- Update the embedded list: `python3 scripts/build_large_airports.py` (small-airport region set by `SMALL_REF_IDENT`/`SMALL_RADIUS_MI` in the script)
 
 ### Aircraft
 
