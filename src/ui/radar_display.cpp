@@ -242,6 +242,25 @@ void extrapolatedLatLon(const services::adsb::Aircraft& plane,
   *lon = plane.lon + (dist_km * sinf(rad)) / kKmPerDeg;
 }
 
+/**
+ * Aircraft symbol + tag scale, shrunk at the widest ranges so distant traffic
+ * stays readable without crowding: full size up to 21 mi, half at 30 mi, a
+ * third at 45 mi.
+ */
+float aircraftDetailScale() {
+  const float miles = radar::rangeCurrent().ring3_km / radar::kKmPerMile;
+  if (miles >= 44.0f) {
+    return 0.7f;
+  }
+  if (miles >= 29.0f) {
+    return 0.8f;
+  }
+  if (miles >= 20.0f) {
+    return 0.9f;
+  }
+  return 1.0f;
+}
+
 float onScreenMaxKm() {
   const float outer_km = radar::rangeCurrent().outer_km;
   // Draw the aircraft symbol as long as it maps onto the round screen (out to
@@ -348,14 +367,17 @@ int speedLineLengthPx(float gs_knots) {
   return len;
 }
 
-void noseTip(int cx, int cy, float heading_deg, int* tip_x, int* tip_y) {
+void noseTip(int cx, int cy, float heading_deg, float scale, int* tip_x,
+             int* tip_y) {
   constexpr float kDegToRad = 0.01745329252f;
   const float rad = heading_deg * kDegToRad;
-  *tip_x = cx + static_cast<int>(lroundf(sinf(rad) * radar::kAircraftNoseLenPx));
-  *tip_y = cy - static_cast<int>(lroundf(cosf(rad) * radar::kAircraftNoseLenPx));
+  const float nose_len = radar::kAircraftNoseLenPx * scale;
+  *tip_x = cx + static_cast<int>(lroundf(sinf(rad) * nose_len));
+  *tip_y = cy - static_cast<int>(lroundf(cosf(rad) * nose_len));
 }
 
-void drawHeadingTriangle(int cx, int cy, float heading_deg, uint16_t color) {
+void drawHeadingTriangle(int cx, int cy, float heading_deg, float scale,
+                         uint16_t color) {
   constexpr float kDegToRad = 0.01745329252f;
   const float rad = heading_deg * kDegToRad;
   const float sin_h = sinf(rad);
@@ -363,22 +385,23 @@ void drawHeadingTriangle(int cx, int cy, float heading_deg, uint16_t color) {
 
   int tip_x = 0;
   int tip_y = 0;
-  noseTip(cx, cy, heading_deg, &tip_x, &tip_y);
+  noseTip(cx, cy, heading_deg, scale, &tip_x, &tip_y);
 
-  const int base_x =
-      cx - static_cast<int>(lroundf(sin_h * static_cast<float>(radar::kAircraftTailLenPx)));
-  const int base_y =
-      cy + static_cast<int>(lroundf(cos_h * static_cast<float>(radar::kAircraftTailLenPx)));
+  const float tail_len = radar::kAircraftTailLenPx * scale;
+  const float tail_half = radar::kAircraftTailHalfPx * scale;
 
-  const int wing_x = static_cast<int>(lroundf(cos_h * radar::kAircraftTailHalfPx));
-  const int wing_y = static_cast<int>(lroundf(sin_h * radar::kAircraftTailHalfPx));
+  const int base_x = cx - static_cast<int>(lroundf(sin_h * tail_len));
+  const int base_y = cy + static_cast<int>(lroundf(cos_h * tail_len));
+
+  const int wing_x = static_cast<int>(lroundf(cos_h * tail_half));
+  const int wing_y = static_cast<int>(lroundf(sin_h * tail_half));
 
   s_draw->fillTriangle(tip_x, tip_y, base_x + wing_x, base_y + wing_y,
                        base_x - wing_x, base_y - wing_y, color);
 }
 
 void drawSpeedVector(int cx, int cy, float heading_deg, float track_deg,
-                     float gs_knots, uint16_t color) {
+                     float gs_knots, float scale, uint16_t color) {
   const int len = speedLineLengthPx(gs_knots);
   if (len <= 0) {
     return;
@@ -386,7 +409,7 @@ void drawSpeedVector(int cx, int cy, float heading_deg, float track_deg,
 
   int tip_x = 0;
   int tip_y = 0;
-  noseTip(cx, cy, heading_deg, &tip_x, &tip_y);
+  noseTip(cx, cy, heading_deg, scale, &tip_x, &tip_y);
 
   constexpr float kDegToRad = 0.01745329252f;
   const float rad = track_deg * kDegToRad;
@@ -400,16 +423,19 @@ void drawSpeedVector(int cx, int cy, float heading_deg, float track_deg,
                        color);
 }
 
-void applyTagStyle() {
+void applyTagStyle(float scale) {
   if (s_tag_use_vlw) {
-    displayFontSetSmoothSize(*s_draw, s_tag_vlw_size);
+    displayFontSetSmoothSize(*s_draw, s_tag_vlw_size * scale);
   } else {
     displayFontSetBitmap(*s_draw, s_tag_gfx);
+    if (scale != 1.0f) {
+      s_draw->setTextSize(scale);
+    }
   }
 }
 
-int measureTagBlockWidth(const services::adsb::Aircraft& plane) {
-  applyTagStyle();
+int measureTagBlockWidth(const services::adsb::Aircraft& plane, float scale) {
+  applyTagStyle(scale);
   int max_w = 0;
   if (plane.callsign[0] != '\0') {
     const int w = s_draw->textWidth(plane.callsign);
@@ -432,17 +458,18 @@ int measureTagBlockWidth(const services::adsb::Aircraft& plane) {
   return max_w;
 }
 
-void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
+void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane,
+                     float scale) {
   initTagLabelMetrics();
-  applyTagStyle();
+  applyTagStyle(scale);
 
   const int line_h = s_draw->fontHeight();
-  const int block_w = measureTagBlockWidth(plane);
+  const int block_w = measureTagBlockWidth(plane, scale);
   const int block_h = line_h * 3;
   int ly = y - block_h / 2;
 
-  const int symbol_half =
-      radar::kAircraftNoseLenPx + radar::kAircraftTailHalfPx;
+  const int symbol_half = static_cast<int>(lroundf(
+      (radar::kAircraftNoseLenPx + radar::kAircraftTailHalfPx) * scale));
   // West (left): tag toward center on the right; east (right): tag on the left.
   const bool tag_on_right = x < radar::kCenterX;
   int anchor_x = 0;
@@ -565,18 +592,21 @@ void drawAircraft() {
     drawBeyondRingDot(dots[d].x, dots[d].y);
   }
 
+  const float detail_scale = aircraftDetailScale();
+
   sortDrawItemsFarFirst(items, draw_count);
   for (size_t d = 0; d < draw_count; ++d) {
     const size_t i = items[d].index;
     const int x = items[d].x;
     const int y = items[d].y;
     drawSpeedVector(x, y, planes[i].nose_deg, planes[i].track_deg,
-                    planes[i].gs_knots, radar::kColorTrackVector);
-    drawHeadingTriangle(x, y, planes[i].nose_deg, radar::kColorAircraft);
+                    planes[i].gs_knots, detail_scale, radar::kColorTrackVector);
+    drawHeadingTriangle(x, y, planes[i].nose_deg, detail_scale,
+                        radar::kColorAircraft);
   }
   for (size_t d = 0; d < draw_count; ++d) {
     const size_t i = items[d].index;
-    drawAircraftTag(items[d].x, items[d].y, planes[i]);
+    drawAircraftTag(items[d].x, items[d].y, planes[i], detail_scale);
   }
 }
 
