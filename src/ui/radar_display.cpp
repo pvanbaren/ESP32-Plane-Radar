@@ -14,6 +14,7 @@
 #include "ui/radar_range.h"
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
+#include "ui/water_overlay.h"
 
 namespace ui {
 namespace radar {
@@ -28,6 +29,7 @@ uint16_t kColorTagType = 0x5DFF;
 uint16_t kColorTagAltitude = 0xFFE0;
 uint16_t kColorRunway = 0x4D5F;
 uint16_t kColorRunwayLabel = 0x7DFF;
+uint16_t kColorWater = 0x0010;
 
 }  // namespace radar
 
@@ -195,6 +197,15 @@ void initPalette() {
       tft.color565(radar::kRunwayR, radar::kRunwayG, radar::kRunwayB);
   radar::kColorRunwayLabel = tft.color565(radar::kRunwayLabelR, radar::kRunwayLabelG,
                                           radar::kRunwayLabelB);
+  // Navy is pure blue, so it needs the same R/B swap as the red aircraft color
+  // to render blue (not dark red) on the BGR GC9A01 panel.
+  if (config::kDisplayRgbOrder) {
+    radar::kColorWater =
+        tft.color565(radar::kWaterB, radar::kWaterG, radar::kWaterR);
+  } else {
+    radar::kColorWater =
+        tft.color565(radar::kWaterR, radar::kWaterG, radar::kWaterB);
+  }
 }
 
 constexpr float kKmPerDeg = 111.0f;
@@ -652,6 +663,7 @@ void drawStaticGrid(Gfx& gfx) {
   drawRings(cx, cy, grid_r);
   drawCrosshairs(cx, cy, grid_r, radar::kColorGrid);
   initPalette();
+  water::drawWaterBodies(gfx);
   runway::drawLargeAirportRunways(gfx);
   drawCenterDot(cx, cy);
   drawCardinalLabels();

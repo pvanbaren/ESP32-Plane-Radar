@@ -88,6 +88,12 @@ constexpr uint8_t kRunwayB = 170;
 constexpr uint8_t kRunwayLabelR = 110;
 constexpr uint8_t kRunwayLabelG = 210;
 constexpr uint8_t kRunwayLabelB = 230;
+/** Water-body outlines: navy blue, 3 px lines. */
+constexpr uint8_t kWaterR = 0;
+constexpr uint8_t kWaterG = 0;
+constexpr uint8_t kWaterB = 128;
+/** drawWideLine half-width for water outlines (3 px total). Fixed, not scaled. */
+constexpr float kWaterLineHalfWidth = 1.5f;
 
 extern uint16_t kColorBackground;
 extern uint16_t kColorGrid;
@@ -99,5 +105,6 @@ extern uint16_t kColorTagType;
 extern uint16_t kColorTagAltitude;
 extern uint16_t kColorRunway;
 extern uint16_t kColorRunwayLabel;
+extern uint16_t kColorWater;
 
 }  // namespace ui::radar
