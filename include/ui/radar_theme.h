@@ -32,7 +32,7 @@ constexpr int kCardinalNorthOffsetY = scaledPx(-1);
 constexpr int kCardinalSouthOffsetY = scaledPx(3);
 
 /** Gap between scale label right edge and outer ring on the east spoke (px). */
-constexpr int kScaleGapFromOuterRing = scaledPx(6);
+constexpr int kScaleGapFromOuterRing = scaledPx(8);
 
 /** Gap between the clock text and the outer ring (px), for top/bottom placement. */
 constexpr int kClockGapFromOuterRing = scaledPx(4);
