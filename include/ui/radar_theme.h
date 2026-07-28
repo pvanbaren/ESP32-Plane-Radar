@@ -37,9 +37,9 @@ constexpr int kScaleGapFromOuterRing = scaledPx(8);
 /** Gap between the clock text and the outer ring (px), for top/bottom placement. */
 constexpr int kClockGapFromOuterRing = scaledPx(4);
 
-/** Clock VLW size (setTextSize factor). Panel-scaled so the clock shrinks with
- *  the display: 0.5x native on the 240 px build, 1.5x on the 720 px Qualia. */
-constexpr float kClockVlwSize = scaledPxF(0.5f);
+/** Target height (px) for the clock. Panel-scaled so the clock shrinks with the
+ *  display: 23 px on the 240 px build, 69 px on the 720 px Qualia. */
+constexpr int kClockLabelHeightPx = scaledPx(23);
 
 /** Target cap height (px) for N/S/E/W — full size (not reduced by the font scale). */
 constexpr int kCardinalLabelHeightPx = scaledPx(14);

@@ -43,9 +43,6 @@ namespace {
 bool s_label_metrics_ready = false;
 bool s_cardinal_use_vlw = false;
 bool s_scale_use_vlw = false;
-float s_cardinal_vlw_size = 0.56f;
-float s_scale_vlw_size = 0.50f;
-float s_tag_vlw_size = 0.56f;
 const lgfx::GFXfont* s_cardinal_gfx = &fonts::FreeSansBold12pt7b;
 const lgfx::GFXfont* s_scale_gfx = &fonts::FreeSansBold9pt7b;
 const lgfx::GFXfont* s_tag_gfx = &fonts::FreeSansBold12pt7b;
@@ -82,28 +79,6 @@ int measureGfxHeight(const lgfx::GFXfont& font) {
   return tft.fontHeight();
 }
 
-int measureVlwHeight(float size) {
-  tft.setTextSize(size);
-  return tft.fontHeight();
-}
-
-float findVlwSizeForHeight(int target_px) {
-  // The embedded VLW is 45 px native, so sizes are well below 1.0 in practice
-  // (e.g. ~0.9 for a 42 px cap height at 720, ~0.24 for an 11 px label at 240).
-  // Keep the bracket wide enough to cover both builds.
-  float lo = 0.12f;
-  float hi = 3.5f;
-  for (int i = 0; i < 16; ++i) {
-    const float mid = (lo + hi) * 0.5f;
-    if (measureVlwHeight(mid) < target_px) {
-      lo = mid;
-    } else {
-      hi = mid;
-    }
-  }
-  return hi;
-}
-
 void applyScaleStyle();
 
 const lgfx::GFXfont* pickGfxFontClosest(
@@ -131,9 +106,7 @@ void initLabelMetrics() {
   const int scale_target = radar::kScaleLabelHeightPx;
   if (displayFontIsSmooth()) {
     s_cardinal_use_vlw = true;
-    s_cardinal_vlw_size = findVlwSizeForHeight(cardinal_target);
     s_scale_use_vlw = true;
-    s_scale_vlw_size = findVlwSizeForHeight(scale_target);
   } else {
     const lgfx::GFXfont* cardinal_candidates[] = {&fonts::FreeSansBold12pt7b,
                                                   &fonts::FreeSansBold9pt7b};
@@ -173,7 +146,6 @@ void initTagLabelMetrics() {
   const int target = radar::kAircraftTagLabelHeightPx;
   if (displayFontIsSmooth()) {
     s_tag_use_vlw = true;
-    s_tag_vlw_size = findVlwSizeForHeight(target);
   } else {
     const lgfx::GFXfont* tag_candidates[] = {&fonts::FreeSansBold12pt7b,
                                                &fonts::FreeSansBold9pt7b};
@@ -437,7 +409,7 @@ void drawSpeedVector(int cx, int cy, float heading_deg, float track_deg,
 
 void applyTagStyle(float scale) {
   if (s_tag_use_vlw) {
-    displayFontSetSmoothSize(*s_draw, s_tag_vlw_size * scale);
+    displayFontApplyHeight(*s_draw, radar::kAircraftTagLabelHeightPx * scale);
   } else {
     displayFontSetBitmap(*s_draw, s_tag_gfx);
     if (scale != 1.0f) {
@@ -624,7 +596,7 @@ void drawAircraft() {
 
 void applyCardinalStyle() {
   if (s_cardinal_use_vlw) {
-    displayFontSetSmoothSize(*s_draw, s_cardinal_vlw_size);
+    displayFontApplyHeight(*s_draw, radar::kCardinalLabelHeightPx);
   } else {
     displayFontSetBitmap(*s_draw, s_cardinal_gfx);
   }
@@ -632,7 +604,7 @@ void applyCardinalStyle() {
 
 void applyScaleStyle() {
   if (s_scale_use_vlw) {
-    displayFontSetSmoothSize(*s_draw, s_scale_vlw_size);
+    displayFontApplyHeight(*s_draw, radar::kScaleLabelHeightPx);
   } else {
     displayFontSetBitmap(*s_draw, s_scale_gfx);
   }
@@ -706,8 +678,8 @@ void drawCardinalLabels() {
 
 /**
  * Optional clock, centered horizontally just inside the outer ring at the top or
- * bottom per the clock setting. White text at radar::kClockVlwSize (panel-scaled).
- * Silently skipped until NTP has set the system time.
+ * bottom per the clock setting. White text at radar::kClockLabelHeightPx
+ * (panel-scaled). Silently skipped until NTP has set the system time.
  */
 void drawClock(int cx, int cy, int outer_radius) {
   const radar::ClockMode mode = radar::clockMode();
@@ -730,7 +702,11 @@ void drawClock(int cx, int cy, int outer_radius) {
   // Drop the leading zero on the hour (e.g. "03:45" -> "3:45").
   char* text = (buf[0] == '0') ? buf + 1 : buf;
 
-  displayFontSetSmoothSize(*s_draw, radar::kClockVlwSize);
+  if (displayFontIsSmooth()) {
+    displayFontApplyHeight(*s_draw, radar::kClockLabelHeightPx);
+  } else {
+    displayFontSetBitmap(*s_draw, s_cardinal_gfx);
+  }
   s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
   if (mode == radar::ClockMode::kTop) {
     s_draw->setTextDatum(textdatum_t::top_center);
