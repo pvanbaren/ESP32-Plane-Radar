@@ -18,6 +18,7 @@
 namespace {
 
 bool g_radar_visible = false;
+bool g_time_sync_started = false;
 unsigned long g_wifi_down_since = 0;
 unsigned long g_last_reconnect_ms = 0;
 unsigned long g_last_redraw_ms = 0;
@@ -27,11 +28,23 @@ unsigned long g_status_shown_ms = 0;
 unsigned long g_last_status_refresh_ms = 0;
 #endif
 
+// Kick off SNTP once WiFi is up (idempotent). Feeds the optional on-screen clock;
+// getLocalTime() returns false until the first sync lands, so the clock simply
+// stays hidden until then.
+void ensureTimeSync() {
+  if (g_time_sync_started) {
+    return;
+  }
+  configTzTime(config::kTimezone, config::kNtpServer1, config::kNtpServer2);
+  g_time_sync_started = true;
+}
+
 void showRadarIfConnected() {
   if (WiFi.status() != WL_CONNECTED) {
     g_radar_visible = false;
     return;
   }
+  ensureTimeSync();
   ui::radarDisplayDraw();
   g_radar_visible = true;
 }

@@ -5,6 +5,7 @@
 #include <Preferences.h>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace ui::radar {
@@ -15,13 +16,27 @@ constexpr char kPrefsNamespace[] = "planeradar";
 constexpr char kPrefsRangeKey[] = "rangeIdx";
 constexpr char kPrefsMilesKey[] = "useMiles";
 constexpr char kPrefsRunwaysKey[] = "showRwys";
+constexpr char kPrefsClockKey[] = "clockMode";
 constexpr uint8_t kDefaultRangeIndex = 1;  // 6 mi ring
+constexpr ClockMode kDefaultClockMode = ClockMode::kOff;
 // kKmPerMile is defined in radar_range.h (ui::radar).
 
 Preferences s_prefs;
 uint8_t s_range_index = kDefaultRangeIndex;
 bool s_use_miles = false;
 bool s_show_runways = true;
+ClockMode s_clock_mode = kDefaultClockMode;
+
+ClockMode clockModeFromValue(uint8_t value) {
+  switch (value) {
+    case static_cast<uint8_t>(ClockMode::kTop):
+      return ClockMode::kTop;
+    case static_cast<uint8_t>(ClockMode::kBottom):
+      return ClockMode::kBottom;
+    default:
+      return ClockMode::kOff;
+  }
+}
 
 void saveRangeIndex() {
   if (!s_prefs.begin(kPrefsNamespace, false)) {
@@ -44,6 +59,14 @@ void saveShowRunways() {
     return;
   }
   s_prefs.putBool(kPrefsRunwaysKey, s_show_runways);
+  s_prefs.end();
+}
+
+void saveClockMode() {
+  if (!s_prefs.begin(kPrefsNamespace, false)) {
+    return;
+  }
+  s_prefs.putUChar(kPrefsClockKey, static_cast<uint8_t>(s_clock_mode));
   s_prefs.end();
 }
 
@@ -70,6 +93,8 @@ void rangeInit() {
       (saved < kRangePresetCount) ? saved : kDefaultRangeIndex;
   s_use_miles = s_prefs.getBool(kPrefsMilesKey, false);
   s_show_runways = s_prefs.getBool(kPrefsRunwaysKey, true);
+  s_clock_mode = clockModeFromValue(
+      s_prefs.getUChar(kPrefsClockKey, static_cast<uint8_t>(kDefaultClockMode)));
   s_prefs.end();
 }
 
@@ -93,6 +118,8 @@ bool useMiles() { return s_use_miles; }
 
 bool showRunways() { return s_show_runways; }
 
+ClockMode clockMode() { return s_clock_mode; }
+
 void saveMilesFromPortal(const char* checkbox_value) {
   s_use_miles = portalCheckboxChecked(checkbox_value);
   saveUseMiles();
@@ -103,6 +130,19 @@ void saveRunwaysFromPortal(const char* checkbox_value) {
   s_show_runways = portalCheckboxChecked(checkbox_value);
   saveShowRunways();
   Serial.printf("Runway overlay: %s\n", s_show_runways ? "on" : "off");
+}
+
+void saveClockModeFromPortal(const char* select_value) {
+  uint8_t value = static_cast<uint8_t>(kDefaultClockMode);
+  if (select_value != nullptr && select_value[0] != '\0') {
+    value = static_cast<uint8_t>(atoi(select_value));
+  }
+  s_clock_mode = clockModeFromValue(value);
+  const char* name = s_clock_mode == ClockMode::kTop      ? "top"
+                     : s_clock_mode == ClockMode::kBottom ? "bottom"
+                                                          : "off";
+  saveClockMode();
+  Serial.printf("Clock: %s\n", name);
 }
 
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles) {
@@ -122,9 +162,11 @@ void formatCurrentRing3Label(char* buf, size_t len) {
 void unitsReset() {
   s_use_miles = false;
   s_show_runways = true;
+  s_clock_mode = kDefaultClockMode;
   if (s_prefs.begin(kPrefsNamespace, false)) {
     s_prefs.remove(kPrefsMilesKey);
     s_prefs.remove(kPrefsRunwaysKey);
+    s_prefs.remove(kPrefsClockKey);
     s_prefs.end();
   }
 }
