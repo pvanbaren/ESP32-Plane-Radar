@@ -1,33 +1,45 @@
 #!/usr/bin/env python3
-"""Generate data/ui_font.vlw — the embedded anti-aliased UI font.
+"""Generate the embedded anti-aliased UI fonts (VLW, TFT_eSPI / LovyanGFX format).
 
-Produces a VLW smooth font (TFT_eSPI / LovyanGFX format) from a TrueType file.
-The font is rendered at 45 px native (3x the original 15 px) so it stays crisp
-when downscaled on both the 240 px (C3) and 720 px (Qualia S3) builds; see
-config::kVlwNativeSizeScale.
+Two kinds of output are produced from one TrueType file:
 
-Charset: ASCII 33..126 plus U+00B0 (degree sign) — 95 glyphs, matching the
-original font. Space (0x20) is intentionally omitted (LovyanGFX derives it).
+  * data/ui_font.vlw  — the "master" font, rendered at 45 px native (3x the
+    15 px baseline). Used by the 240 px C3 build for everything, and by the
+    720 px Qualia build for the boot/status screens. It is only ever
+    downscaled at runtime (crisp); see config::kVlwNativeSizeScale.
 
-Usage:
-    python scripts/build_ui_font.py NotoSans-Regular.ttf [-o data/ui_font.vlw]
+  * data/ui_font_<H>.vlw — one font per exact on-screen pixel height H used by
+    the 720 px Qualia radar (cardinals, range label, tags, runways, clock).
+    LovyanGFX's VLW scaler is nearest-neighbour (no interpolation), so drawing
+    each label from a font rendered natively at its target height is crisper
+    than up/down-scaling a single master. EM_PX is solved per height so the
+    font's reported height (ascent+descent) matches H; the firmware then draws
+    at ~1.0x. See displayFontApplyHeight() in hardware/display_font.cpp.
+
+Charset: ASCII 33..126 plus U+00B0 (degree sign) — 95 glyphs. Space (0x20) is
+intentionally omitted (LovyanGFX derives it).
+
+Usage (regenerate everything the firmware embeds):
+    python scripts/build_ui_font.py assets/fonts/NotoSans-Regular.ttf \
+        --out-dir data --master-em 45 --heights 14,16,17,18,20,21,42,69
 
 Requires Pillow (PIL) with FreeType support.
 """
 import argparse
+import os
 import struct
 
 from PIL import Image, ImageDraw, ImageFont
 
-EM_PX = 45  # native render size (== 3 x the 15 px baseline; see kVlwNativeSizeScale)
 CHARSET = list(range(33, 127)) + [0xB0]
 
 
-def build(ttf_path: str) -> bytes:
-    font = ImageFont.truetype(ttf_path, EM_PX)
+def build(ttf_path: str, em_px: int) -> tuple[bytes, int]:
+    """Return (vlw_bytes, font_height) for the font rendered at em_px."""
+    font = ImageFont.truetype(ttf_path, em_px)
     ascent, descent = font.getmetrics()
-    pad = EM_PX
-    canvas_w, canvas_h = EM_PX * 3, ascent + descent + 2 * pad
+    pad = em_px
+    canvas_w, canvas_h = em_px * 3, ascent + descent + 2 * pad
     baseline_y, pen_x = pad + ascent, pad
 
     glyphs = []  # (codepoint, height, width, xAdvance, dY, gdX, bitmap)
@@ -54,25 +66,63 @@ def build(ttf_path: str) -> bytes:
 
     out = bytearray()
     # Header (big-endian): count, version, fontSize, mboxY(unused), ascent, descent
-    out += struct.pack(">IIIIII", len(glyphs), 11, EM_PX, 0, hdr_ascent, hdr_descent)
+    out += struct.pack(">IIIIII", len(glyphs), 11, em_px, 0, hdr_ascent, hdr_descent)
     # Per-glyph metrics: unicode, height, width, xAdvance, dY, gdX, pad
     for cp, h, w, adv, dY, gdX, _ in glyphs:
         out += struct.pack(">iiiiiii", cp, h, w, adv, dY, gdX, 0)
     # Bitmaps (8-bit alpha, row-major), in glyph order
     for *_, bmp in glyphs:
         out += bmp
-    return bytes(out)
+    # LovyanGFX reports fontHeight as ascent + descent (the header values).
+    return bytes(out), hdr_ascent + hdr_descent
+
+
+def solve_em_for_height(ttf_path: str, target_h: int) -> tuple[int, bytes, int]:
+    """Find the EM_PX whose rendered font-height is closest to target_h.
+
+    Height grows monotonically with EM_PX (~1.03x), so scan a small window and
+    prefer the smallest EM_PX whose height is >= target (residual downscale, not
+    a blocky upscale)."""
+    best = None  # (abs_err, height>=target, em, bytes, height)
+    lo = max(6, target_h - 6)
+    for em in range(lo, target_h + 7):
+        data, h = build(ttf_path, em)
+        key = (abs(h - target_h), 0 if h >= target_h else 1)
+        if best is None or key < best[0]:
+            best = (key, em, data, h)
+    _, em, data, h = best
+    return em, data, h
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("ttf", help="path to a TrueType font (e.g. NotoSans-Regular.ttf)")
-    ap.add_argument("-o", "--out", default="data/ui_font.vlw")
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("ttf", help="path to a TrueType font (e.g. assets/fonts/NotoSans-Regular.ttf)")
+    ap.add_argument("--out-dir", default="data", help="output directory (default: data)")
+    ap.add_argument("--master-em", type=int, default=45,
+                    help="EM_PX for the master ui_font.vlw (default: 45)")
+    ap.add_argument("--heights", default="",
+                    help="comma-separated exact on-screen heights for the per-size set "
+                         "(e.g. 14,16,17,18,20,21,42,69); empty = master only")
     args = ap.parse_args()
-    data = build(args.ttf)
-    with open(args.out, "wb") as f:
-        f.write(data)
-    print(f"wrote {args.out}: {len(data)} bytes, {len(CHARSET)} glyphs @ {EM_PX}px")
+
+    os.makedirs(args.out_dir, exist_ok=True)
+
+    master, mh = build(args.ttf, args.master_em)
+    master_path = os.path.join(args.out_dir, "ui_font.vlw")
+    with open(master_path, "wb") as f:
+        f.write(master)
+    print(f"wrote {master_path}: {len(master)} bytes, {len(CHARSET)} glyphs "
+          f"@ EM_PX={args.master_em} (height {mh})")
+
+    if args.heights.strip():
+        for target in [int(x) for x in args.heights.split(",") if x.strip()]:
+            em, data, h = solve_em_for_height(args.ttf, target)
+            path = os.path.join(args.out_dir, f"ui_font_{target}.vlw")
+            with open(path, "wb") as f:
+                f.write(data)
+            print(f"wrote {path}: {len(data)} bytes @ EM_PX={em} "
+                  f"(height {h}, target {target})")
 
 
 if __name__ == "__main__":

@@ -133,7 +133,8 @@ include/
     radar_location.h
     adsb_client.h
 data/
-  ui_font.vlw              — embedded smooth UI font (Noto Sans Bold)
+  ui_font.vlw              — embedded smooth UI font, master 45 px (Noto Sans Regular)
+  ui_font_<H>.vlw          — per-size fonts at each exact 720 px radar height (Qualia only)
 scripts/
   build_large_airports.py
 src/

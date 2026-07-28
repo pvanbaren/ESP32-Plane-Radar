@@ -40,37 +40,15 @@ double s_built_lon = 0.0;
 
 bool s_runway_label_ready = false;
 bool s_runway_label_use_vlw = false;
-float s_runway_label_vlw_size = 0.38f;
 const lgfx::GFXfont* s_runway_label_gfx = &fonts::FreeSansBold12pt7b;
 
-int measureVlwHeight(lgfx::LGFXBase& gfx, float size) {
-  gfx.setTextSize(size);
-  return gfx.fontHeight();
-}
-
-float findVlwSizeForHeight(lgfx::LGFXBase& gfx, int target_px) {
-  float lo = 0.2f;
-  float hi = 1.2f;
-  for (int i = 0; i < 14; ++i) {
-    const float mid = (lo + hi) * 0.5f;
-    if (measureVlwHeight(gfx, mid) < target_px) {
-      lo = mid;
-    } else {
-      hi = mid;
-    }
-  }
-  return hi;
-}
-
-void initRunwayLabelStyle(lgfx::LGFXBase& gfx) {
+void initRunwayLabelStyle() {
   if (s_runway_label_ready) {
     return;
   }
 
-  const int target = radar::kRunwayLabelHeightPx;
   if (displayFontIsSmooth()) {
     s_runway_label_use_vlw = true;
-    s_runway_label_vlw_size = findVlwSizeForHeight(gfx, target);
   } else {
     s_runway_label_gfx = &fonts::FreeSansBold12pt7b;
     s_runway_label_use_vlw = false;
@@ -80,7 +58,7 @@ void initRunwayLabelStyle(lgfx::LGFXBase& gfx) {
 
 void applyRunwayLabelStyle(lgfx::LGFXBase& gfx) {
   if (s_runway_label_use_vlw) {
-    displayFontSetSmoothSize(gfx, s_runway_label_vlw_size);
+    displayFontApplyHeight(gfx, radar::kRunwayLabelHeightPx);
   } else {
     displayFontSetBitmap(gfx, s_runway_label_gfx);
   }
@@ -349,7 +327,7 @@ void drawLargeAirportRunways(lgfx::LGFXBase& gfx) {
     return;
   }
 
-  initRunwayLabelStyle(gfx);
+  initRunwayLabelStyle();
   applyRunwayLabelStyle(gfx);
   for (size_t i = 0; i < label_count; ++i) {
     drawAirportLabel(gfx, data::large_airports::kAirports[label_airports[i]]);

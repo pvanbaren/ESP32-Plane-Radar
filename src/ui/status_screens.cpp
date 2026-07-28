@@ -75,12 +75,14 @@ int lineHeightGfx(const lgfx::GFXfont* font) {
 }
 
 int lineHeightVlw(float size) {
+  displayFontEnsureLoaded(tft);
   displayFontSetSmoothSize(tft, size);
   return tft.fontHeight();
 }
 
 void applyLineStyle(const TextLine& line) {
   if (displayFontIsSmooth()) {
+    displayFontEnsureLoaded(tft);
     displayFontSetSmoothSize(tft, scaledVlw(line.vlw_size));
   } else {
     displayFontSetBitmap(tft, line.gfx_font);
@@ -120,6 +122,7 @@ constexpr float kConnectingDetailVlw = 0.92f;
 
 void applyConnectingDetailStyle() {
   if (displayFontIsSmooth()) {
+    displayFontEnsureLoaded(tft);
     displayFontSetSmoothSize(tft, scaledVlw(kConnectingDetailVlw));
   } else {
     displayFontSetBitmap(tft, &kConnectingGfxDetail);
