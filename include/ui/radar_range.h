@@ -40,6 +40,9 @@ constexpr RangePreset kRangePresets[] = {
 constexpr size_t kRangePresetCount =
     sizeof(kRangePresets) / sizeof(kRangePresets[0]);
 
+/** On-screen clock placement. */
+enum class ClockMode : uint8_t { kOff = 0, kTop = 1, kBottom = 2 };
+
 /** Load saved range and distance units from flash. Call once after boot. */
 void rangeInit();
 /** Cycle preset and save to flash. */
@@ -51,9 +54,12 @@ float fetchRadiusKm();
 
 bool useMiles();
 bool showRunways();
+ClockMode clockMode();
 /** WiFi portal checkbox: "T" = miles, otherwise km. */
 void saveMilesFromPortal(const char* checkbox_value);
 void saveRunwaysFromPortal(const char* checkbox_value);
+/** WiFi portal select: "0" = Off, "1" = Top, "2" = Bottom. */
+void saveClockModeFromPortal(const char* select_value);
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles);
 void formatCurrentRing3Label(char* buf, size_t len);
 /** Reset distance units to km (e.g. with WiFi credential wipe). */

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <ctime>
 
 #include "config.h"
 #include "hardware/display.h"
@@ -692,6 +693,43 @@ void drawCardinalLabels() {
   drawCardinalLabel("E", edge, cy, textdatum_t::middle_right);
 }
 
+/**
+ * Optional clock, centered horizontally just inside the outer ring at the top or
+ * bottom per the clock setting. White text at radar::kClockVlwSize (panel-scaled).
+ * Silently skipped until NTP has set the system time.
+ */
+void drawClock(int cx, int cy, int outer_radius) {
+  const radar::ClockMode mode = radar::clockMode();
+  if (mode == radar::ClockMode::kOff) {
+    return;
+  }
+
+  // Read the clock directly rather than via getLocalTime(&tm, 0): with a 0 ms
+  // timeout its `while ((millis() - start) <= ms)` guard can skip the body
+  // entirely if millis() ticks over between the two reads, returning false even
+  // when the time is valid — which blanks the clock for that one frame.
+  const time_t now = time(nullptr);
+  struct tm now_tm;
+  localtime_r(&now, &now_tm);
+  if (now_tm.tm_year <= (2016 - 1900)) {
+    return;  // time not synced yet
+  }
+  char buf[6];
+  strftime(buf, sizeof(buf), "%I:%M", &now_tm);  // 12-hour clock
+  // Drop the leading zero on the hour (e.g. "03:45" -> "3:45").
+  char* text = (buf[0] == '0') ? buf + 1 : buf;
+
+  displayFontSetSmoothSize(*s_draw, radar::kClockVlwSize);
+  s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
+  if (mode == radar::ClockMode::kTop) {
+    s_draw->setTextDatum(textdatum_t::top_center);
+    s_draw->drawString(text, cx, cy - outer_radius + radar::kClockGapFromOuterRing);
+  } else {
+    s_draw->setTextDatum(textdatum_t::bottom_center);
+    s_draw->drawString(text, cx, cy + outer_radius - radar::kClockGapFromOuterRing);
+  }
+}
+
 int scaleLabelAnchorX(int cx, int outer_radius) {
   return cx + outer_radius - radar::kScaleGapFromOuterRing;
 }
@@ -720,6 +758,7 @@ void drawStaticGrid(Gfx& gfx) {
   drawCenterDot(cx, cy);
   drawCardinalLabels();
   drawScaleLabel(cx, cy, grid_r);
+  drawClock(cx, cy, grid_r);
   gfx.setTextDatum(textdatum_t::top_left);
 }
 

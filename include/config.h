@@ -99,6 +99,14 @@ constexpr unsigned long kStatusScreenTimeoutMs = 20000;
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */
 constexpr bool kAdsbShowGroundAircraft = false;
 
+// --- Clock / time sync (NTP) ---
+// SNTP servers polled once WiFi is up; used only for the optional on-screen clock.
+constexpr char kNtpServer1[] = "pool.ntp.org";
+constexpr char kNtpServer2[] = "time.nist.gov";
+// POSIX TZ string (handles DST automatically). Default: US Eastern, matching the
+// KGRR default location. Change this to suit a different locale.
+constexpr char kTimezone[] = "EST5EDT,M3.2.0,M11.1.0";
+
 // --- UI colors (RGB565) — status screens ---
 constexpr uint16_t kColorBlack = 0x0000;
 constexpr uint16_t kColorYellow = 0xFFE0;

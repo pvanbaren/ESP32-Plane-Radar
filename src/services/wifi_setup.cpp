@@ -91,6 +91,15 @@ char s_runways_checkbox_attrs[32] = "type=\"checkbox\"";
 WiFiManagerParameter s_param_runways("show_runways", "Show airport runways", "T", 2,
                                      s_runways_checkbox_attrs, WFM_LABEL_AFTER);
 
+// WiFiManager has no native <select>, so smuggle one in through the custom-HTML
+// slot: disable+hide the generated <input> (a disabled control isn't submitted)
+// and append our own <select name="clock_mode">. The trailing '>' from the
+// parameter template closes the </select. onPortalParamsSaved reads it via
+// getValue() → server->arg("clock_mode").
+char s_clock_select_html[320] = "";
+WiFiManagerParameter s_param_clock("clock_mode", "Display clock", "0", 2,
+                                   s_clock_select_html, WFM_NO_LABEL);
+
 void refreshPortalParamDefaults() {
   char lat_buf[kCoordParamLen + 1];
   char lon_buf[kCoordParamLen + 1];
@@ -104,6 +113,20 @@ void refreshPortalParamDefaults() {
   snprintf(s_runways_checkbox_attrs, sizeof(s_runways_checkbox_attrs),
            "type=\"checkbox\"%s", ui::radar::showRunways() ? " checked" : "");
   s_param_runways.setValue("T", 2);
+
+  const ui::radar::ClockMode clock = ui::radar::clockMode();
+  snprintf(s_clock_select_html, sizeof(s_clock_select_html),
+           "disabled hidden>"
+           "<label for='clock_sel'>Display clock</label><br/>"
+           "<select id='clock_sel' name='clock_mode'>"
+           "<option value='0'%s>Off</option>"
+           "<option value='1'%s>Top</option>"
+           "<option value='2'%s>Bottom</option>"
+           "</select",
+           clock == ui::radar::ClockMode::kOff ? " selected" : "",
+           clock == ui::radar::ClockMode::kTop ? " selected" : "",
+           clock == ui::radar::ClockMode::kBottom ? " selected" : "");
+  s_param_clock.setValue("0", 2);
 }
 
 void onPortalParamsSaved() {
@@ -113,6 +136,7 @@ void onPortalParamsSaved() {
   }
   ui::radar::saveMilesFromPortal(s_param_miles.getValue());
   ui::radar::saveRunwaysFromPortal(s_param_runways.getValue());
+  ui::radar::saveClockModeFromPortal(s_param_clock.getValue());
 }
 
 void attachPortalParams(WiFiManager& wm) {
@@ -121,6 +145,7 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_lon);
   wm.addParameter(&s_param_miles);
   wm.addParameter(&s_param_runways);
+  wm.addParameter(&s_param_clock);
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }
 
