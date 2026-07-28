@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
-"""Build a water-body outline dataset from Natural Earth 10m lakes.
+"""Build a water-body outline dataset from the USGS National Hydrography Dataset.
 
-Natural Earth's 10m lakes layer is a curated set of the world's *major* lakes
-(the Great Lakes included). We fetch it as GeoJSON (no geo dependencies — pure
-stdlib), keep only the parts within a fixed radius of KGRR (Gerald R. Ford
-Intl, Grand Rapids, MI — the default radar center), simplify each shore run
-with Douglas-Peucker, and emit the result as flat polylines of lat/lon (e7).
+The USGS NHD (high-resolution "Large Scale" waterbody layer) is the authoritative
+US water dataset — every lake, pond, and reservoir at full shoreline detail, far
+finer than Natural Earth's curated major-lakes layer. We query it through The
+National Map's ArcGIS REST endpoint as GeoJSON (no geo dependencies — pure
+stdlib), restricted to a bounding box around KGRR (Gerald R. Ford Intl, Grand
+Rapids, MI — the default radar center) and to waterbodies at or above a minimum
+area. We keep only the parts within a fixed radius of the center, simplify each
+shore run with Douglas-Peucker, and emit the result as flat polylines of lat/lon
+(e7).
+
+The server generalizes geometry for us (maxAllowableOffset) so the Great Lakes
+don't arrive as multi-hundred-thousand-vertex polygons; Douglas-Peucker then
+does the final shore-preserving reduction.
 
 Rings that straddle the keep-radius (e.g. Lake Michigan, most of which lies
 outside the window) are split into open polylines clipped to the region so we
@@ -17,6 +25,7 @@ from __future__ import annotations
 
 import json
 import math
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -24,11 +33,16 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT_H = ROOT / "include" / "data" / "water_bodies.h"
 OUT_CPP = ROOT / "src" / "data" / "water_bodies_data.cpp"
 
-# nvkelso/natural-earth-vector mirrors every Natural Earth layer as GeoJSON.
-LAKES_URL = (
-    "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/"
-    "geojson/ne_10m_lakes.geojson"
+# NHD high-resolution waterbody layer (12 = "Waterbody - Large Scale") on The
+# National Map's ArcGIS REST service. Polygons, GeoJSON output, server-side
+# pagination and generalization.
+NHD_QUERY_URL = (
+    "https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapServer/12/query"
 )
+
+# FTYPE codes to keep: 390 = LakePond, 436 = Reservoir. (Excludes swamp/marsh,
+# estuary, playa, ice mass — not "bodies of water" for this display.)
+WATERBODY_FTYPES = (390, 436)
 
 # Radar center = KGRR (must match config::kDefaultRadarLat/Lon).
 CENTER_LAT = 42.8808
@@ -42,9 +56,22 @@ MI_TO_KM = 1.609344
 EARTH_RADIUS_KM = 6371.0
 KEEP_RADIUS_KM = KEEP_RADIUS_MI * MI_TO_KM
 
-# Douglas-Peucker tolerance (degrees). Natural Earth 10m lakes is already sparse
-# for the Great Lakes (~50 vertices across the whole window), so the tolerance is
-# kept small — it only drops near-colinear points, preserving the shore shape.
+# Drop lakes smaller than this. At the ~0.28 mi/px scale of a 100-mile radar,
+# anything much below a few km² is barely a couple of pixels across, so this
+# both keeps the dataset small and avoids sub-pixel clutter. Tune to taste.
+MIN_AREA_SQKM = 2.0
+
+# Server-side generalization (maxAllowableOffset, in outSR degrees). Kept a touch
+# finer than the Douglas-Peucker tolerance so the server trims the raw geometry
+# to a manageable size without pre-empting the client-side shore simplification.
+SERVER_GENERALIZE_DEG = 0.0008
+
+# ArcGIS returns at most maxRecordCount (2000) features per request; page through.
+PAGE_SIZE = 2000
+
+# Douglas-Peucker tolerance (degrees). NHD shorelines are dense, so this is the
+# main lever on the embedded dataset's size; it drops near-colinear points while
+# preserving the shore shape.
 SIMPLIFY_TOLERANCE_DEG = 0.0015
 
 
@@ -60,10 +87,56 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2.0 * EARTH_RADIUS_KM * math.asin(math.sqrt(a))
 
 
-def fetch_geojson(url: str) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent": "plane-radar-build"})
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+def keep_bbox() -> tuple[float, float, float, float]:
+    """Lon/lat envelope enclosing the keep-radius, with a 10% margin."""
+    km_per_deg_lat = EARTH_RADIUS_KM * math.pi / 180.0
+    dlat = KEEP_RADIUS_KM / km_per_deg_lat * 1.1
+    dlon = dlat / max(math.cos(math.radians(CENTER_LAT)), 1e-6)
+    return (CENTER_LON - dlon, CENTER_LAT - dlat,
+            CENTER_LON + dlon, CENTER_LAT + dlat)
+
+
+def fetch_nhd_features() -> list[dict]:
+    """Fetch all matching NHD waterbody features in the keep-bbox, paginated."""
+    xmin, ymin, xmax, ymax = keep_bbox()
+    ftypes = ",".join(str(t) for t in WATERBODY_FTYPES)
+    where = f"AREASQKM>={MIN_AREA_SQKM} AND FTYPE IN ({ftypes})"
+    base = {
+        "geometry": f"{xmin},{ymin},{xmax},{ymax}",
+        "geometryType": "esriGeometryEnvelope",
+        "inSR": "4326",
+        "outSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "where": where,
+        "outFields": "OBJECTID",
+        "returnGeometry": "true",
+        "maxAllowableOffset": str(SERVER_GENERALIZE_DEG),
+        "orderByFields": "OBJECTID",  # stable order for pagination
+        "resultRecordCount": str(PAGE_SIZE),
+        "f": "geojson",
+    }
+
+    features: list[dict] = []
+    offset = 0
+    while True:
+        params = dict(base, resultOffset=str(offset))
+        url = NHD_QUERY_URL + "?" + urllib.parse.urlencode(params)
+        req = urllib.request.Request(url, headers={"User-Agent": "plane-radar-build"})
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            page = json.loads(resp.read().decode("utf-8"))
+        if "error" in page:
+            raise RuntimeError(f"NHD query error: {page['error']}")
+        batch = page.get("features", [])
+        features.extend(batch)
+        # exceededTransferLimit (when present) is authoritative; otherwise a full
+        # page means there may be more.
+        more = page.get("exceededTransferLimit")
+        if more is None:
+            more = len(batch) == PAGE_SIZE
+        if not more or not batch:
+            break
+        offset += len(batch)
+    return features
 
 
 def iter_rings(geometry: dict):
@@ -186,10 +259,10 @@ def coord_e7(v: float) -> int:
 
 
 def build_dataset():
-    data = fetch_geojson(LAKES_URL)
+    features = fetch_nhd_features()
     polylines = []  # list of (list[(lat_e7, lon_e7)], closed)
 
-    for feature in data.get("features", []):
+    for feature in features:
         geom = feature.get("geometry") or {}
         for ring in iter_rings(geom):
             for pts, closed in ring_runs(ring):
@@ -199,9 +272,9 @@ def build_dataset():
                 e7 = [(coord_e7(lat), coord_e7(lon)) for lon, lat in simplified]
                 polylines.append((e7, closed))
 
-    # Natural Earth stores some adjacent water bodies (e.g. Saginaw Bay and Lake
-    # Huron) as separate features sharing an identical boundary edge, so drop
-    # runs whose exact point list we've already emitted.
+    # Adjacent waterbodies can share an identical boundary edge and some rings
+    # survive clipping identically, so drop runs whose exact point list we've
+    # already emitted.
     deduped = []
     seen = set()
     for e7, closed in polylines:
