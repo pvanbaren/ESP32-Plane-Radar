@@ -9,9 +9,10 @@
 // on-screen height the 720 px radar uses (see scripts/build_ui_font.py and
 // platformio.ini). LovyanGFX's VLW scaler is nearest-neighbour, so drawing a
 // label from a font rendered at its target height is crisper than scaling the
-// master; displayFontApplyHeight() picks the closest and applies a ~1.0
-// residual scale. On the C3 build only the master exists, so the same call
-// downscales the 45 px master exactly as before.
+// master; displayFontApplyHeight() picks the closest and renders it natively
+// unless the size gap is worth a fractional rescale (>3% and >1 px). On the C3
+// build only the master exists, so most labels exceed that threshold and get
+// downscaled from the 45 px master.
 extern "C" {
 extern const uint8_t _binary_data_ui_font_vlw_start[] asm(
     "_binary_data_ui_font_vlw_start");
@@ -127,7 +128,17 @@ void displayFontApplyHeight(lgfx::LGFXBase& gfx, float target_px) {
     }
   }
   useFont(gfx, s_fonts[best].data);
-  gfx.setTextSize(target_px / s_fonts[best].native_h);
+  const float native_h = s_fonts[best].native_h;
+  const float scale = target_px / native_h;
+  // Only fractionally rescale when the closest native size is off by enough to
+  // matter: both more than 3% and more than one pixel. LovyanGFX's VLW scaler is
+  // nearest-neighbour, so a tiny rescale only softens the glyphs without a
+  // visible size change — render native (1.0) in that case. On the Qualia the
+  // per-size fonts almost always land within the threshold and stay native; on
+  // the C3, with only the master, larger deltas fall through to a downscale.
+  const bool worth_rescaling =
+      std::fabs(scale - 1.0f) > 0.03f && std::fabs(target_px - native_h) > 1.0f;
+  gfx.setTextSize(worth_rescaling ? scale : 1.0f);
 }
 
 void displayFontSetBitmap(lgfx::LGFXBase& gfx, const lgfx::GFXfont* font) {
