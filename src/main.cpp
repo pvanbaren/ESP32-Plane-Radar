@@ -183,22 +183,34 @@ void loop() {
 
 #endif
   if (WiFi.status() != WL_CONNECTED) {
-    if (g_radar_visible) {
-      Serial.println("WiFi lost — will reconnect");
-      g_radar_visible = false;
-    }
-
     if (g_wifi_down_since == 0) {
       g_wifi_down_since = millis();
+      Serial.println("WiFi link down — riding it out (auto-reconnect active)");
     }
-
     const unsigned long down_ms = millis() - g_wifi_down_since;
-    if (down_ms >= config::kWifiDownGraceMs &&
-        millis() - g_last_reconnect_ms >= config::kWifiReconnectIntervalMs) {
-      g_last_reconnect_ms = millis();
-      if (wifiReconnect()) {
-        g_wifi_down_since = 0;
-        showRadarIfConnected();
+
+    if (down_ms < config::kWifiRideOutMs) {
+      // Marginal/brief drop: leave the radar up and keep dead-reckoning it while
+      // the ESP32's auto-reconnect works the link in the background. No visible
+      // "Connecting" churn, and no blocking teardown that would freeze the UI.
+      if (g_radar_visible &&
+          millis() - g_last_redraw_ms >= config::kRadarRedrawIntervalMs) {
+        g_last_redraw_ms = millis();
+        ui::radarDisplayRefreshAircraft();
+      }
+    } else {
+      // Sustained outage: auto-reconnect hasn't recovered it, so hand the screen
+      // to the Connecting UI and do a full blocking reconnect.
+      if (g_radar_visible) {
+        Serial.println("WiFi down past ride-out — reconnecting");
+        g_radar_visible = false;
+      }
+      if (millis() - g_last_reconnect_ms >= config::kWifiReconnectIntervalMs) {
+        g_last_reconnect_ms = millis();
+        if (wifiReconnect()) {
+          g_wifi_down_since = 0;
+          showRadarIfConnected();
+        }
       }
     }
   } else {

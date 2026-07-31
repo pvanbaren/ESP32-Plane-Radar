@@ -18,8 +18,12 @@ constexpr unsigned long kWifiConnectAttemptMs = 15000;
 constexpr uint8_t kWifiConnectAttempts = 3;
 constexpr unsigned long kWifiPortalTimeoutSec = 0;  // 0 = no timeout while configuring
 constexpr unsigned long kWifiConnectingFrameMs = 50;
-/** Wait after disconnect before reconnecting (avoids portal on brief drops). */
-constexpr unsigned long kWifiDownGraceMs = 4000;
+/** How long the link may be down before we give up riding it out. Below this,
+ *  the radar stays on screen and keeps dead-reckoning while the ESP32's own
+ *  auto-reconnect restores a marginal link; only a drop that persists past this
+ *  hands the screen to the "Connecting" UI. Keeps a flapping AP from bouncing
+ *  the display between the radar and the connecting message. */
+constexpr unsigned long kWifiRideOutMs = 20000;
 /** Minimum interval between background reconnect tries. */
 constexpr unsigned long kWifiReconnectIntervalMs = 15000;
 
