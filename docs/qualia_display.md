@@ -154,13 +154,21 @@ via `config::kUiScale` (= `kDisplayWidth / 240`, so 3× at 720 px):
 ## Controls (Phase 4)
 
 The C3's single BOOT button (GPIO 9) is an RGB data line on the Qualia, so
-controls use the two **TCA9554 buttons** instead (polled over I²C, active-low):
+controls use the two **TCA9554 buttons** instead (active-low, sampled by a
+background FreeRTOS task — `qualiaButtonsStart()` — so a tap isn't lost while the
+main loop is blocked in the ~1-2 s ADS-B fetch):
 
 | Button | Gesture | Effect |
 |--------|---------|--------|
-| **UP** (expander bit 5) | tap | Range up (next larger preset) |
-| **DN** (expander bit 6) | tap | Range down (next smaller preset) |
+| **UP** (expander bit 5) | tap | Range up (next larger preset; wraps) |
+| **DN** (expander bit 6) | tap | Toggle the full-screen status screen |
 | **DN** (expander bit 6) | hold 3 s | Clear Wi-Fi / location / units, reboot to setup |
+
+The **status screen** overlays the radar with Wi-Fi state/signal, SSID, IP,
+`http://plane-radar.local`, free heap, sketch size, chip temperature, uptime,
+and the home lat/lon. It refreshes ~1 Hz and auto-returns to the radar after
+`config::kStatusScreenTimeoutMs` (20 s); a second DN tap dismisses it. The DN
+gesture is `TARGET_QUALIA_S3`-gated, so the C3 build is unchanged.
 
 If your board doesn't populate these buttons, the controls simply never
 trigger (range still defaults and persists via NVS). If a button reads
