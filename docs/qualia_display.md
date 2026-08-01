@@ -24,6 +24,30 @@ The init sequence and all pin/timing values are transcribed from Adafruit's
 CircuitPython board + `displays/round40.py` definitions for this exact
 board+panel, so they match a known-good configuration.
 
+## Toolchain (IDF 5.x)
+
+The `qualia_s3` env uses the **pioarduino** platform (arduino-esp32 3.3.9 /
+ESP-IDF 5.5.4) instead of stock `espressif32@6.x` — IDF 5.x is required for the
+esp_lcd RGB **double framebuffer + bounce buffer** that makes redraws
+tear/flicker-free (IDF 4.4 has none of those APIs). The C3 `supermini` env is
+unchanged (stock `espressif32@6.5.0`).
+
+Running the pioarduino *platform* under stock PlatformIO core needs two one-time
+fixes to the PlatformIO virtualenv (`~/.platformio/penv`) — done once per
+machine:
+
+```bash
+# 1. Python deps the pioarduino platform scripts expect
+~/.platformio/penv/Scripts/python -m pip install requests urllib3 pyelftools esptool
+
+# 2. esptool: the platform tries an editable install of a tool dir that has no
+#    Python module under stock PIO. builder/penv_setup.py::install_esptool is
+#    patched locally to `uv pip install esptool` (normal) instead of `-e <dir>`.
+```
+
+If a `pio` build ever reports "Failed to install Python dependencies into penv"
+or "No module named esptool/requests/urllib3", re-run step 1.
+
 ## Build & flash
 
 ```bash
