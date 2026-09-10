@@ -1,6 +1,7 @@
 #include "services/adsb_client.h"
 
 #include <HTTPClient.h>
+#include <WiFiClient.h>
 #include <WiFiClientSecure.h>
 
 #include <ArduinoJson.h>
