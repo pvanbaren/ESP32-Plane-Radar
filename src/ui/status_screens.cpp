@@ -18,9 +18,6 @@
 #include "services/radar_location.h"
 #endif
 
-// LovyanGFX (>=~1.2.x) already exposes a global `fonts` namespace via
-// lgfx_fonts.hpp, so no local alias is needed (and an alias now collides).
-
 namespace {
 
 // Pixel dimensions and VLW font sizes here are authored for a 240 px display
