@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "config.h"
+#include "services/http_body_framing.h"
 
 namespace services::adsb {
 
@@ -67,74 +68,51 @@ int performGetWithPoll(HTTPClient& http) {
 }
 
 /**
- * Feeds the response body to the JSON parser one byte at a time without
- * buffering the whole thing.
+ * Pumps the socket one byte at a time, in blocks, without buffering the whole
+ * response.
  *
- * ArduinoJson pulls single bytes, so the socket is drained in blocks and
- * handed out from buffer_. Each refill runs the network poll callback, which
- * is why HTTPClient's own body readers (getString/writeToStream) can't be
- * used here -- they block without giving the fetch task a chance to poll.
+ * Each refill runs the network poll callback, which is why HTTPClient's own
+ * body readers (getString/writeToStream) can't be used here -- they block
+ * without giving the fetch task a chance to poll. That also means they can't
+ * de-chunk for us, so the wire image comes out raw and BodyFramer unwraps it.
+ *
+ * Where the body ends is BodyFramer's business, not this class's: it stops
+ * pulling at the right byte. Reading a little past that point into buffer_ is
+ * harmless while the connection is torn down after every fetch.
  */
-class PollingBodyReader {
+class PollingSocketSource {
  public:
-  PollingBodyReader(HTTPClient& http, WiFiClient& stream, int content_length,
-                    unsigned long deadline)
-      : http_(&http),
-        stream_(&stream),
-        remaining_(content_length),
-        deadline_(deadline) {}
+  PollingSocketSource(HTTPClient& http, WiFiClient& stream,
+                      unsigned long deadline)
+      : http_(&http), stream_(&stream), deadline_(deadline) {}
 
-  /** Next body byte, or -1 at end of body / timeout. Never returns 0. */
+  /** Next raw byte, or -1 once the socket closes or the deadline passes. */
   int read() {
     if (pos_ >= len_ && !refill()) {
       return -1;
     }
-    ++total_;
     return static_cast<unsigned char>(buffer_[pos_++]);
   }
-
-  size_t readBytes(char* out, size_t length) {
-    size_t n = 0;
-    while (n < length) {
-      const int c = read();
-      if (c < 0) {
-        break;
-      }
-      out[n++] = static_cast<char>(c);
-    }
-    return n;
-  }
-
-  size_t bytesRead() const { return total_; }
 
  private:
   bool refill() {
     pos_ = 0;
     len_ = 0;
-    if (remaining_ == 0) {
-      return false;  // Content-Length fully consumed
-    }
     while (millis() < deadline_) {
       pollNetwork();
       const int available = stream_->available();
       if (available > 0) {
-        int to_read = available > static_cast<int>(sizeof(buffer_))
-                          ? static_cast<int>(sizeof(buffer_))
-                          : available;
-        if (remaining_ > 0 && remaining_ < to_read) {
-          to_read = remaining_;  // never read past the end of the body
-        }
+        const int to_read = available > static_cast<int>(sizeof(buffer_))
+                                ? static_cast<int>(sizeof(buffer_))
+                                : available;
         const int read_bytes = stream_->readBytes(buffer_, to_read);
         if (read_bytes > 0) {
           len_ = static_cast<size_t>(read_bytes);
-          if (remaining_ > 0) {
-            remaining_ -= read_bytes;
-          }
           return true;
         }
       }
       if (!http_->connected() && stream_->available() <= 0) {
-        break;  // server closed and the socket is drained: end of body
+        break;  // server closed and the socket is drained
       }
       delay(1);
     }
@@ -143,13 +121,13 @@ class PollingBodyReader {
 
   HTTPClient* http_;
   WiFiClient* stream_;
-  int remaining_;  // bytes left per Content-Length, or < 0 when unknown
   unsigned long deadline_;
   char buffer_[512];
   size_t pos_ = 0;
   size_t len_ = 0;
-  size_t total_ = 0;
 };
+
+using BodyReader = services::http::BodyFramer<PollingSocketSource>;
 
 /**
  * Builds the deserialization filter. The keys below are the only ones the
@@ -342,7 +320,11 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     return false;
   }
 
-  http.useHTTP10(true);
+  // HTTPClient only records Transfer-Encoding in the collected headers when
+  // it is asked for up front; _transferEncoding itself is private.
+  static const char* kWantedHeaders[] = {"Transfer-Encoding"};
+  http.collectHeaders(kWantedHeaders, 1);
+
   http.setTimeout(kRequestTimeoutMs);
   const int code = performGetWithPoll(http);
   if (code != HTTP_CODE_OK) {
@@ -365,14 +347,28 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   JsonDocument filter;
   buildAircraftFilter(filter);
 
-  PollingBodyReader body(http, *stream, http.getSize(),
-                         millis() + kRequestTimeoutMs);
+  // On HTTP/1.1 the CDN answers with Transfer-Encoding: chunked, and
+  // getStreamPtr() hands back the raw socket -- chunk sizes and all. BodyFramer
+  // strips that framing back off.
+  const services::http::BodyFraming framing =
+      http.header("Transfer-Encoding").equalsIgnoreCase("chunked")
+          ? services::http::BodyFraming::kChunked
+          : services::http::BodyFraming::kIdentity;
+
+  PollingSocketSource source(http, *stream, millis() + kRequestTimeoutMs);
+  BodyReader body(source, framing, http.getSize());
   JsonDocument doc;
   const DeserializationError err =
       deserializeJson(doc, body, DeserializationOption::Filter(filter));
+  // Read off the terminating chunk the parser stopped short of, so the socket
+  // sits at the end of the message. Not needed while every fetch builds its own
+  // connection, but a prerequisite for ever reusing one.
+  body.drain();
   http.end();
   if (err) {
-    if (body.bytesRead() == 0) {
+    if (body.framingError()) {
+      Serial.println("adsb: malformed chunked body");
+    } else if (body.bytesRead() == 0) {
       Serial.println("adsb: empty response");
     } else {
       Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
