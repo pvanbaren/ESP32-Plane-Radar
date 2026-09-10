@@ -74,43 +74,114 @@ int performGetWithPoll(HTTPClient& http) {
   return HTTPC_ERROR_READ_TIMEOUT;
 }
 
-bool readResponseBodyWithPoll(HTTPClient& http, String& payload) {
-  WiFiClient* stream = http.getStreamPtr();
-  if (stream == nullptr) {
+/**
+ * Feeds the response body to the JSON parser one byte at a time without
+ * buffering the whole thing.
+ *
+ * ArduinoJson pulls single bytes, so the socket is drained in blocks and
+ * handed out from buffer_. Each refill runs the network poll callback, which
+ * is why HTTPClient's own body readers (getString/writeToStream) can't be
+ * used here -- they block without giving the fetch task a chance to poll.
+ */
+class PollingBodyReader {
+ public:
+  PollingBodyReader(HTTPClient& http, WiFiClient& stream, int content_length,
+                    unsigned long deadline)
+      : http_(&http),
+        stream_(&stream),
+        remaining_(content_length),
+        deadline_(deadline) {}
+
+  /** Next body byte, or -1 at end of body / timeout. Never returns 0. */
+  int read() {
+    if (pos_ >= len_ && !refill()) {
+      return -1;
+    }
+    ++total_;
+    return static_cast<unsigned char>(buffer_[pos_++]);
+  }
+
+  size_t readBytes(char* out, size_t length) {
+    size_t n = 0;
+    while (n < length) {
+      const int c = read();
+      if (c < 0) {
+        break;
+      }
+      out[n++] = static_cast<char>(c);
+    }
+    return n;
+  }
+
+  size_t bytesRead() const { return total_; }
+
+ private:
+  bool refill() {
+    pos_ = 0;
+    len_ = 0;
+    if (remaining_ == 0) {
+      return false;  // Content-Length fully consumed
+    }
+    while (millis() < deadline_) {
+      pollNetwork();
+      const int available = stream_->available();
+      if (available > 0) {
+        int to_read = available > static_cast<int>(sizeof(buffer_))
+                          ? static_cast<int>(sizeof(buffer_))
+                          : available;
+        if (remaining_ > 0 && remaining_ < to_read) {
+          to_read = remaining_;  // never read past the end of the body
+        }
+        const int read_bytes = stream_->readBytes(buffer_, to_read);
+        if (read_bytes > 0) {
+          len_ = static_cast<size_t>(read_bytes);
+          if (remaining_ > 0) {
+            remaining_ -= read_bytes;
+          }
+          return true;
+        }
+      }
+      if (!http_->connected() && stream_->available() <= 0) {
+        break;  // server closed and the socket is drained: end of body
+      }
+      delay(1);
+    }
     return false;
   }
 
-  const int content_length = http.getSize();
-  if (content_length > 0) {
-    payload.reserve(static_cast<unsigned>(content_length + 1));
-  }
+  HTTPClient* http_;
+  WiFiClient* stream_;
+  int remaining_;  // bytes left per Content-Length, or < 0 when unknown
+  unsigned long deadline_;
+  char buffer_[512];
+  size_t pos_ = 0;
+  size_t len_ = 0;
+  size_t total_ = 0;
+};
 
-  uint8_t buffer[512];
-  const unsigned long deadline = millis() + kRequestTimeoutMs;
-  while (millis() < deadline) {
-    pollNetwork();
-    const int available = stream->available();
-    if (available > 0) {
-      const int to_read =
-          available > static_cast<int>(sizeof(buffer)) ? static_cast<int>(sizeof(buffer))
-                                                       : available;
-      const int read_bytes = stream->readBytes(buffer, to_read);
-      if (read_bytes > 0) {
-        payload.concat(reinterpret_cast<const char*>(buffer),
-                       static_cast<unsigned>(read_bytes));
-      }
-    }
-    if (content_length > 0 &&
-        static_cast<int>(payload.length()) >= content_length) {
-      break;
-    }
-    if (!http.connected() && stream->available() <= 0) {
-      break;
-    }
-    delay(1);
-  }
-
-  return payload.length() > 0;
+/**
+ * Builds the deserialization filter. The keys below are the only ones the
+ * radar reads, out of the ~40 each adsb.fi v3 record carries; the parser
+ * skips the rest (rssi, mlat, tisb, nic, messages, ...) without storing them.
+ */
+void buildAircraftFilter(JsonDocument& filter) {
+  // A filter array applies its first element to every element of the input.
+  JsonObject plane = filter["ac"].add<JsonObject>();
+  plane["lat"] = true;
+  plane["lon"] = true;
+  plane["track"] = true;
+  plane["true_heading"] = true;
+  plane["mag_heading"] = true;
+  plane["dir"] = true;
+  plane["gs"] = true;
+  plane["tas"] = true;
+  plane["ias"] = true;
+  plane["alt_baro"] = true;
+  plane["alt_geom"] = true;
+  plane["seen_pos"] = true;
+  plane["flight"] = true;
+  plane["hex"] = true;
+  plane["t"] = true;
 }
 
 float kmToNauticalMiles(float km) { return km / kKmPerNm; }
@@ -288,18 +359,32 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     return false;
   }
 
-  String payload;
-  if (!readResponseBodyWithPoll(http, payload)) {
-    Serial.println("adsb: empty response");
+  WiFiClient* stream = http.getStreamPtr();
+  if (stream == nullptr) {
+    Serial.println("adsb: no response stream");
     http.end();
     return false;
   }
-  http.end();
 
+  // Parse straight off the socket, with a filter that keeps only the fields
+  // the radar reads. The body is never held in RAM as a whole and the skipped
+  // fields never get a document slot, so peak heap stays flat no matter how
+  // many aircraft the API returns.
+  JsonDocument filter;
+  buildAircraftFilter(filter);
+
+  PollingBodyReader body(http, *stream, http.getSize(),
+                         millis() + kRequestTimeoutMs);
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, payload);
+  const DeserializationError err =
+      deserializeJson(doc, body, DeserializationOption::Filter(filter));
+  http.end();
   if (err) {
-    Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
+    if (body.bytesRead() == 0) {
+      Serial.println("adsb: empty response");
+    } else {
+      Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
+    }
     return false;
   }
 
