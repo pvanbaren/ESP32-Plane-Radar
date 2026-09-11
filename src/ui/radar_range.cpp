@@ -114,6 +114,17 @@ float fetchRadiusKm() {
   return outer_km * (screen_r_px / static_cast<float>(kGridOuterRadius));
 }
 
+float aircraftFetchRadiusKm() {
+  // Nominal fast-traffic ground speed (kt). Aircraft up to this quick are in
+  // the feed a full track horizon before they cross onto the panel, which is
+  // what the inbound vectors need; slower traffic is covered with room to
+  // spare. Range-independent, so the margin dominates at the close-in presets.
+  constexpr float kInboundGsKnots = 500.0f;
+  constexpr float kInboundMarginKm =
+      kInboundGsKnots * 1.852f * kAircraftTrackHorizonSec / 3600.0f;
+  return fetchRadiusKm() + kInboundMarginKm;
+}
+
 bool useMiles() { return s_use_miles; }
 
 bool showRunways() { return s_show_runways; }

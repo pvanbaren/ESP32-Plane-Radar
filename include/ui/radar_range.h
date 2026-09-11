@@ -51,6 +51,10 @@ const RangePreset& rangeCurrent();
 uint8_t rangeIndex();
 /** ADSB fetch radius (km): scaled to screen edge so beyond-ring dots have data. */
 float fetchRadiusKm();
+/** Aircraft fetch radius (km): the screen edge plus the distance fast traffic
+ *  covers in one track horizon, so inbound aircraft are already in the feed
+ *  when their vector reaches the panel. */
+float aircraftFetchRadiusKm();
 
 bool useMiles();
 bool showRunways();

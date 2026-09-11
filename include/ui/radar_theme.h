@@ -59,14 +59,11 @@ constexpr int kCenterDotRadius = scaledPx(2);
 constexpr int kAircraftNoseLenPx = scaledPx(8);
 constexpr int kAircraftTailLenPx = scaledPx(3);
 constexpr int kAircraftTailHalfPx = scaledPx(4);
-/** Track vector: ground distance covered in this many seconds at current gs. */
+/** Track vector: ground distance covered in this many seconds at current gs,
+ *  drawn at the active range preset's map scale. */
 constexpr float kAircraftTrackHorizonSec = 60.0f;
 /** Minimum visible vector when gs > 0 (px). */
 constexpr int kAircraftSpeedLineMinPx = scaledPx(2);
-/** Track line length uses this outer_km, not the active range preset. */
-constexpr float kAircraftTrackRefOuterKm = 13.3f;
-/** Shorter than full 60 s horizon at ref scale; ×1.5 length boost applied. */
-constexpr float kAircraftTrackLengthScale = 1.5f / 5.0f;
 /** drawWideLine half-width for speed vectors (2 px total). Fixed, not scaled —
  *  matches the thin grid stroke rather than growing to 6 px at 720. */
 constexpr float kAircraftTrackLineHalfWidth = 1.0f;
@@ -81,8 +78,19 @@ constexpr int kAircraftLabelGapPx = scaledPx(1);
 constexpr int kAircraftInsideRingInsetPx =
     kAircraftNoseLenPx + kAircraftTailHalfPx + scaledPx(1);
 
-/** Beyond-ring traffic: bearing cues on screen rim (correct direction, fixed radius). */
-constexpr int kBeyondRingDotRadiusPx = scaledPx(4);
+/** Beyond-ring traffic: bearing cues on screen rim (correct direction, fixed radius).
+ *  The marker is a short arrow — shaft plus arrowhead, like a compass needle —
+ *  pointing radially out toward the aircraft, based kBeyondRingArrowGapPx
+ *  outside the outer ring. Gap + length must stay inside kCenterX: on the 240 px
+ *  build 107 + 2 + 9 = 118 of 120. */
+constexpr int kBeyondRingArrowGapPx = scaledPx(2);
+constexpr int kBeyondRingArrowLenPx = scaledPx(9);
+/** Arrowhead barbs: length back from the tip, and half-width across their ends. */
+constexpr int kBeyondRingArrowHeadLenPx = scaledPx(4);
+constexpr int kBeyondRingArrowHalfPx = scaledPx(3);
+/** Shaft and barb stroke: drawWideLine half-width, so 1 px total. Absolute —
+ *  neither panel-scaled nor matched to the 2 px grid stroke. */
+constexpr float kBeyondRingArrowLineHalfWidth = 0.5f;
 constexpr int kBeyondRingScreenMarginPx = scaledPx(2);
 /** Target cap height (px) for aircraft tags (slightly above scale label). */
 constexpr int kAircraftTagLabelHeightPx = fontPx(13);

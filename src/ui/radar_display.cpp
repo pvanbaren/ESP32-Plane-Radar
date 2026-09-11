@@ -280,7 +280,8 @@ int distSqFromCenter(int x, int y) {
 }
 
 /** Rim dot from true bearing; always on screen edge (even if target is 50+ km away). */
-bool beyondRingEdgeDotFromLatLon(float lat, float lon, int* out_x, int* out_y) {
+/** True bearing to an aircraft that is off the panel; false if it is on it. */
+bool beyondRingBearingFromLatLon(float lat, float lon, float* angle_rad) {
   float dx_km = 0.0f;
   float dy_km = 0.0f;
   float dist_km = 0.0f;
@@ -292,46 +293,128 @@ bool beyondRingEdgeDotFromLatLon(float lat, float lon, int* out_x, int* out_y) {
     return false;
   }
 
-  const int cx = radar::kCenterX;
-  const int cy = radar::kCenterY;
-  const int rim_r = radar::kCenterX - radar::kBeyondRingScreenMarginPx;
-  const float angle_rad = atan2f(dx_km, dy_km);
-
-  *out_x = cx + static_cast<int>(lroundf(sinf(angle_rad) * rim_r));
-  *out_y = cy - static_cast<int>(lroundf(cosf(angle_rad) * rim_r));
+  *angle_rad = atan2f(dx_km, dy_km);
   return true;
 }
 
-void drawBeyondRingDot(int x, int y) {
-  s_draw->fillSmoothCircle(x, y, radar::kBeyondRingDotRadiusPx,
-                           radar::kColorAircraft);
+/** Screen point at radius r along a bearing (0 = N, clockwise). */
+void radialPoint(float sin_a, float cos_a, float r, int* x, int* y) {
+  *x = radar::kCenterX + static_cast<int>(lroundf(sin_a * r));
+  *y = radar::kCenterY - static_cast<int>(lroundf(cos_a * r));
 }
 
-void clipToScreenEdge(int x0, int y0, int* x1, int* y1) {
-  const int max_r = radar::kCenterX - radar::kBeyondRingScreenMarginPx;
-  const int max_r_sq = max_r * max_r;
-  if (distSqFromCenter(*x1, *y1) <= max_r_sq) {
-    return;
+/**
+ * Off-panel marker: a short arrow pointing radially out along angle_rad —
+ * shaft from just outside the outer ring, two barbs swept back from the tip.
+ * Drawn in 1 px strokes; all three strokes terminate on the same tip pixel.
+ */
+void drawBeyondRingArrow(float angle_rad) {
+  const float sin_a = sinf(angle_rad);
+  const float cos_a = cosf(angle_rad);
+  const float base_r = static_cast<float>(radar::kGridOuterRadius +
+                                          radar::kBeyondRingArrowGapPx);
+  const float tip_r = base_r + radar::kBeyondRingArrowLenPx;
+  const float head_r = tip_r - radar::kBeyondRingArrowHeadLenPx;
+
+  int base_x = 0;
+  int base_y = 0;
+  int tip_x = 0;
+  int tip_y = 0;
+  int head_x = 0;
+  int head_y = 0;
+  radialPoint(sin_a, cos_a, base_r, &base_x, &base_y);
+  radialPoint(sin_a, cos_a, tip_r, &tip_x, &tip_y);
+  radialPoint(sin_a, cos_a, head_r, &head_x, &head_y);
+
+  const int wing_x =
+      static_cast<int>(lroundf(cos_a * radar::kBeyondRingArrowHalfPx));
+  const int wing_y =
+      static_cast<int>(lroundf(sin_a * radar::kBeyondRingArrowHalfPx));
+
+  // Shaft and both barbs are drawn to the one rounded tip point, so the three
+  // strokes meet on a single pixel at every bearing.
+  constexpr float kStroke = radar::kBeyondRingArrowLineHalfWidth;
+  s_draw->drawWideLine(base_x, base_y, tip_x, tip_y, kStroke,
+                       radar::kColorAircraft);
+  s_draw->drawWideLine(tip_x, tip_y, head_x + wing_x, head_y + wing_y, kStroke,
+                       radar::kColorAircraft);
+  s_draw->drawWideLine(tip_x, tip_y, head_x - wing_x, head_y - wing_y, kStroke,
+                       radar::kColorAircraft);
+}
+
+/**
+ * Trim the segment x0,y0 -> x1,y1 to the canvas rectangle (Liang-Barsky).
+ * Either end may lie outside — an inbound aircraft sits off-panel and only the
+ * arriving stretch is kept. Returns false when no part of it is on the canvas.
+ *
+ * This is a cost guard, not a correctness one: drawWideLine already clamps to
+ * the canvas, so the pixels come out the same either way. But its scan starts
+ * at the raw endpoint row and only the *bounds* are clamped, so an endpoint
+ * hundreds of rows off-panel scans hundreds of full-width rows of alpha math to
+ * draw a few visible pixels — and a vector merely passing near the panel is
+ * scanned in full for no output at all. Clipping to the same rectangle the
+ * library draws into leaves the visible pixels untouched and drops both costs.
+ */
+bool clipSegmentToScreen(int x0, int y0, int x1, int y1, int* out_x0,
+                         int* out_y0, int* out_x1, int* out_y1) {
+  const float dx = static_cast<float>(x1 - x0);
+  const float dy = static_cast<float>(y1 - y0);
+  const float fx = static_cast<float>(x0);
+  const float fy = static_cast<float>(y0);
+  constexpr float kMax = static_cast<float>(radar::kSize - 1);
+
+  // Left, right, top, bottom: the segment is inside edge i while q[i] >= t*p[i].
+  const float p[4] = {-dx, dx, -dy, dy};
+  const float q[4] = {fx, kMax - fx, fy, kMax - fy};
+
+  float t0 = 0.0f;
+  float t1 = 1.0f;
+  for (int i = 0; i < 4; ++i) {
+    if (p[i] == 0.0f) {
+      if (q[i] < 0.0f) {  // parallel to this edge and wholly outside it
+        return false;
+      }
+      continue;
+    }
+    const float r = q[i] / p[i];
+    if (p[i] < 0.0f) {  // entering this edge
+      if (r > t1) {
+        return false;
+      }
+      if (r > t0) {
+        t0 = r;
+      }
+    } else {  // leaving this edge
+      if (r < t0) {
+        return false;
+      }
+      if (r < t1) {
+        t1 = r;
+      }
+    }
   }
 
-  const int dx = *x1 - x0;
-  const int dy = *y1 - y0;
-  float t = 1.0f;
-  for (int step = 0; step < 20; ++step) {
-    const int px = x0 + static_cast<int>(lroundf(dx * t));
-    const int py = y0 + static_cast<int>(lroundf(dy * t));
-    if (distSqFromCenter(px, py) <= max_r_sq) {
-      *x1 = px;
-      *y1 = py;
-      return;
-    }
-    t -= 0.05f;
-    if (t <= 0.0f) {
-      *x1 = x0;
-      *y1 = y0;
-      return;
-    }
+  *out_x0 = x0 + static_cast<int>(lroundf(dx * t0));
+  *out_y0 = y0 + static_cast<int>(lroundf(dy * t0));
+  *out_x1 = x0 + static_cast<int>(lroundf(dx * t1));
+  *out_y1 = y0 + static_cast<int>(lroundf(dy * t1));
+  return true;
+}
+
+/** Draw the on-screen stretch of a track vector, or nothing if it has none. */
+void drawClippedVector(int x0, int y0, int x1, int y1, uint16_t color) {
+  int cx0 = 0;
+  int cy0 = 0;
+  int cx1 = 0;
+  int cy1 = 0;
+  if (!clipSegmentToScreen(x0, y0, x1, y1, &cx0, &cy0, &cx1, &cy1)) {
+    return;
   }
+  if (cx0 == cx1 && cy0 == cy1) {
+    return;
+  }
+  s_draw->drawWideLine(cx0, cy0, cx1, cy1, radar::kAircraftTrackLineHalfWidth,
+                       color);
 }
 
 int speedLineLengthPx(float gs_knots) {
@@ -339,12 +422,13 @@ int speedLineLengthPx(float gs_knots) {
     return 0;
   }
 
-  // Fixed screen scale: 60 s horizon at gs, not tied to current range zoom.
+  // True to the map scale: the line spans the distance the aircraft covers in
+  // kAircraftTrackHorizonSec at gs, so its tip marks the projected position.
   constexpr float kKmPerKnotPerHorizon =
       1.852f * radar::kAircraftTrackHorizonSec / 3600.0f;
-  const float px =
-      gs_knots * kKmPerKnotPerHorizon * radar::kGridOuterRadius /
-      radar::kAircraftTrackRefOuterKm * radar::kAircraftTrackLengthScale;
+  const float px_per_km =
+      static_cast<float>(radar::kGridOuterRadius) / radar::rangeCurrent().outer_km;
+  const float px = gs_knots * kKmPerKnotPerHorizon * px_per_km;
 
   const int len = static_cast<int>(px + 0.5f);
   if (len < radar::kAircraftSpeedLineMinPx) {
@@ -399,14 +483,32 @@ void drawSpeedVector(int cx, int cy, float heading_deg, float track_deg,
 
   constexpr float kDegToRad = 0.01745329252f;
   const float rad = track_deg * kDegToRad;
-  int ex = tip_x + static_cast<int>(lroundf(sinf(rad) * len));
-  int ey = tip_y - static_cast<int>(lroundf(cosf(rad) * len));
-  clipToScreenEdge(tip_x, tip_y, &ex, &ey);
-  if (ex == tip_x && ey == tip_y) {
-    return;
+  const int ex = tip_x + static_cast<int>(lroundf(sinf(rad) * len));
+  const int ey = tip_y - static_cast<int>(lroundf(cosf(rad) * len));
+  drawClippedVector(tip_x, tip_y, ex, ey, color);
+}
+
+/**
+ * On-screen stretch of the track vector for an aircraft at x,y that is off the
+ * panel — its true position, so no nose offset applies. Returns false when the
+ * projected path does not reach the panel inside the track horizon, which is
+ * also the test for whether the aircraft is shown at all.
+ */
+bool inboundVectorSegment(int x, int y, float track_deg, float gs_knots,
+                          int* vx0, int* vy0, int* vx1, int* vy1) {
+  const int len = speedLineLengthPx(gs_knots);
+  if (len <= 0) {
+    return false;
   }
-  s_draw->drawWideLine(tip_x, tip_y, ex, ey, radar::kAircraftTrackLineHalfWidth,
-                       color);
+
+  constexpr float kDegToRad = 0.01745329252f;
+  const float rad = track_deg * kDegToRad;
+  const int ex = x + static_cast<int>(lroundf(sinf(rad) * len));
+  const int ey = y - static_cast<int>(lroundf(cosf(rad) * len));
+  if (!clipSegmentToScreen(x, y, ex, ey, vx0, vy0, vx1, vy1)) {
+    return false;
+  }
+  return *vx0 != *vx1 || *vy0 != *vy1;
 }
 
 void applyTagStyle(float scale) {
@@ -495,10 +597,14 @@ struct AircraftDrawItem {
   int dist_sq = 0;
 };
 
-struct BeyondDotDrawItem {
-  int x = 0;
-  int y = 0;
-  int dist_sq = 0;
+struct BeyondRingMarker {
+  /** Bearing to the aircraft; the arrow points radially out along it. */
+  float angle_rad = 0.0f;
+  /** On-screen stretch of the aircraft's inbound track vector. */
+  int vx0 = 0;
+  int vy0 = 0;
+  int vx1 = 0;
+  int vy1 = 0;
 };
 
 void sortDrawItemsFarFirst(AircraftDrawItem* items, size_t count) {
@@ -513,17 +619,6 @@ void sortDrawItemsFarFirst(AircraftDrawItem* items, size_t count) {
   }
 }
 
-void sortBeyondDotsFarFirst(BeyondDotDrawItem* items, size_t count) {
-  for (size_t i = 1; i < count; ++i) {
-    const BeyondDotDrawItem key = items[i];
-    size_t j = i;
-    while (j > 0 && items[j - 1].dist_sq < key.dist_sq) {
-      items[j] = items[j - 1];
-      --j;
-    }
-    items[j] = key;
-  }
-}
 
 void drawAircraft() {
   initLabelMetrics();
@@ -535,9 +630,9 @@ void drawAircraft() {
       planes, services::adsb::kMaxAircraft, &base_ms);
 
   AircraftDrawItem items[services::adsb::kMaxAircraft];
-  BeyondDotDrawItem dots[services::adsb::kMaxAircraft];
+  BeyondRingMarker markers[services::adsb::kMaxAircraft];
   size_t draw_count = 0;
-  size_t dot_count = 0;
+  size_t marker_count = 0;
 
   for (size_t i = 0; i < n; ++i) {
     // Dead-reckoned position for smooth motion between fetches.
@@ -562,20 +657,37 @@ void drawAircraft() {
       continue;
     }
 
-    int dot_x = 0;
-    int dot_y = 0;
-    if (!beyondRingEdgeDotFromLatLon(lat, lon, &dot_x, &dot_y)) {
+    float angle_rad = 0.0f;
+    if (!beyondRingBearingFromLatLon(lat, lon, &angle_rad)) {
       continue;
     }
-    dots[dot_count].x = dot_x;
-    dots[dot_count].y = dot_y;
-    dots[dot_count].dist_sq = distSqFromCenter(dot_x, dot_y);
-    ++dot_count;
+    // Off-panel traffic only earns a marker if it is actually arriving: the
+    // vector from its true position has to reach the panel within the horizon.
+    int plane_x = 0;
+    int plane_y = 0;
+    latLonToScreen(lat, lon, &plane_x, &plane_y);
+    int vx0 = 0;
+    int vy0 = 0;
+    int vx1 = 0;
+    int vy1 = 0;
+    if (!inboundVectorSegment(plane_x, plane_y, planes[i].track_deg,
+                              planes[i].gs_knots, &vx0, &vy0, &vx1, &vy1)) {
+      continue;
+    }
+
+    markers[marker_count].angle_rad = angle_rad;
+    markers[marker_count].vx0 = vx0;
+    markers[marker_count].vy0 = vy0;
+    markers[marker_count].vx1 = vx1;
+    markers[marker_count].vy1 = vy1;
+    ++marker_count;
   }
 
-  sortBeyondDotsFarFirst(dots, dot_count);
-  for (size_t d = 0; d < dot_count; ++d) {
-    drawBeyondRingDot(dots[d].x, dots[d].y);
+  for (size_t m = 0; m < marker_count; ++m) {
+    s_draw->drawWideLine(markers[m].vx0, markers[m].vy0, markers[m].vx1,
+                         markers[m].vy1, radar::kAircraftTrackLineHalfWidth,
+                         radar::kColorTrackVector);
+    drawBeyondRingArrow(markers[m].angle_rad);
   }
 
   const float detail_scale = aircraftDetailScale();

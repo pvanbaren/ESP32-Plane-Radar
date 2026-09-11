@@ -111,7 +111,7 @@ void adsbFetchTask(void*) {
     if (WiFi.status() == WL_CONNECTED) {
       services::adsb::fetchUpdate(services::location::lat(),
                                   services::location::lon(),
-                                  ui::radar::fetchRadiusKm());
+                                  ui::radar::aircraftFetchRadiusKm());
     }
     vTaskDelay(pdMS_TO_TICKS(config::kAdsbFetchIntervalMs));
   }
