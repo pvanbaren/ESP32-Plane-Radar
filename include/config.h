@@ -44,6 +44,20 @@ constexpr uint32_t kDisplaySpiWriteHz = 40000000;
 constexpr bool kDisplayInvert = true;
 constexpr bool kDisplayRgbOrder = true;
 
+// --- UI scaling ---
+// The radar UI was laid out for a 240 px display. Every pixel dimension is
+// expressed relative to that baseline and multiplied by kUiScale, so the same
+// layout fills larger panels (e.g. the 720 px Qualia, kUiScale = 3)
+// proportionally. On the 240 px build kUiScale == 1 and nothing changes.
+constexpr int kUiBaseSize = 240;
+constexpr float kUiScale = static_cast<float>(kDisplayWidth) / kUiBaseSize;
+
+/** Frame sprites above this size are allocated in PSRAM: internal DMA RAM
+ *  cannot hold them. Keyed on the panel, not the board — 240x240x16bpp is
+ *  ~115 KB and stays internal, while 480 and 720 panels need ~460 KB and
+ *  ~1 MB. A panel that trips this therefore requires a board with PSRAM. */
+constexpr size_t kMaxInternalFrameBytes = 200u * 1024u;
+
 // --- Radar center defaults (overridden via WiFi setup portal) ---
 constexpr double kDefaultRadarLat = 52.3676;
 constexpr double kDefaultRadarLon = 4.9041;

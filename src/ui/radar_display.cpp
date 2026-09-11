@@ -77,7 +77,9 @@ int measureVlwHeight(float size) {
 
 float findVlwSizeForHeight(int target_px) {
   float lo = 0.25f;
-  float hi = 1.2f;
+  // Upper bound must exceed the largest scaled target: on the 720 px build the
+  // cardinal cap height is ~42 px, which needs a VLW size around 1.7.
+  float hi = 3.5f;
   for (int i = 0; i < 16; ++i) {
     const float mid = (lo + hi) * 0.5f;
     if (measureVlwHeight(mid) < target_px) {
@@ -664,6 +666,14 @@ bool ensureFrameSprite() {
     return true;
   }
   s_frame.setColorDepth(16);
+  // Large panels need the frame in PSRAM; the 240 px sprite stays in internal
+  // RAM. Decided by panel size rather than board type, so any panel over the
+  // threshold gets PSRAM wherever it is built.
+  constexpr size_t kFrameBytes =
+      static_cast<size_t>(radar::kSize) * static_cast<size_t>(radar::kSize) * 2u;
+  if (kFrameBytes > config::kMaxInternalFrameBytes) {
+    s_frame.setPsram(true);
+  }
   if (!s_frame.createSprite(radar::kSize, radar::kSize)) {
     Serial.println("radar: frame sprite alloc failed");
     return false;
