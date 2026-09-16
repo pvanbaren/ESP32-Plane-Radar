@@ -122,6 +122,9 @@ void drawSegment(lgfx::LGFXBase& gfx, int x0, int y0, int x1, int y1) {
 }  // namespace
 
 void drawWaterBodies(lgfx::LGFXBase& gfx) {
+  if (!radar::showWater()) {
+    return;
+  }
   for (size_t p = 0; p < data::water_bodies::kPolylineCount; ++p) {
     const auto& pl = data::water_bodies::kPolylines[p];
     if (pl.count < 2) {

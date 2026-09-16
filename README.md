@@ -33,7 +33,7 @@ During setup you can also hold BOOT at power-on to force a credential reset (sam
 **Reconfigure anytime** (after the device is on your network):
 
 1. Open **`http://plane-radar.local`** or **`http://<device-ip>`** (e.g. from your router or serial log at boot)
-2. Change Wi‑Fi, location, units, or runway overlay; save
+2. Change Wi‑Fi, location, units, or the runway / water overlays; save
 
 The same portal runs on the setup AP and on the device’s LAN IP while connected to Wi‑Fi. mDNS hostname is `plane-radar` → **plane-radar.local** (`kPortalHostname` in `config.h`). Some clients resolve `.local` slowly; use the IP if needed.
 
@@ -44,6 +44,7 @@ The same portal runs on the setup AP and on the device’s LAN IP while connecte
 | **Latitude / Longitude** | Radar center and ADS-B query position (defaults in `config.h` until set) |
 | **Display distances in miles** | Ring scale label in **mi** instead of **km** (e.g. `6mi` vs `10km`) |
 | **Show airport runways** | Major-airport runway overlay on the radar (off to hide) |
+| **Show water bodies** | Navy water-body outlines on the radar (off to hide) |
 
 After a reset, the device reboots and shows the setup screen immediately (no “Connecting” loop on stale credentials).
 
@@ -73,6 +74,13 @@ Preset and miles/km choice persist across reboot (`planeradar` NVS namespace).
 - Major airports from OurAirports (`large_airport`); all open runway strips in range (helipads excluded)
 - Teal runway lines with one ICAO label per airport (e.g. `KJFK`); toggle in the Wi‑Fi setup portal
 - Update the embedded list: `python3 scripts/build_large_airports.py`
+
+### Water bodies
+
+- Navy outlines of lakes, rivers and coastline, clipped to the outer ring; toggle in the Wi‑Fi setup portal
+- The embedded dataset is pre-filtered at build time to within 100 mi of the default radar center. Move the center far via the portal and the outlines no longer line up
+- Regenerate with `python3 scripts/build_water_bodies.py`; it reads the center from `kDefaultRadarLat` / `kDefaultRadarLon` in `config.h`, so set those first. Adjust `KEEP_RADIUS_MI` in the script to change the window
+- Source is the USGS National Hydrography Dataset, which covers the **United States only** — a center outside US coverage has no data and the script stops rather than writing an empty overlay
 
 ### Aircraft
 
