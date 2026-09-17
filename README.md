@@ -80,7 +80,7 @@ Preset and miles/km choice persist across reboot (`planeradar` NVS namespace).
 - Navy outlines of lakes, rivers and coastline, clipped to the outer ring; toggle in the Wi‑Fi setup portal
 - The embedded dataset is pre-filtered at build time to within 100 mi of the default radar center. Move the center far via the portal and the outlines no longer line up
 - Regenerate with `python3 scripts/build_water_bodies.py`; it reads the center from `kDefaultRadarLat` / `kDefaultRadarLon` in `config.h`, so set those first. Adjust `KEEP_RADIUS_MI` in the script to change the window
-- Source is the USGS National Hydrography Dataset, which covers the **United States only** — a center outside US coverage has no data and the script stops rather than writing an empty overlay
+- Source is OpenStreetMap via the Overpass API, so any radar center worldwide is supported. The window is fetched in tiles; a dense region would otherwise exceed what a public Overpass instance will answer
 
 ### Aircraft
 
@@ -215,3 +215,13 @@ The release workflow builds firmware in CI and attaches the merged image to the 
 - [LovyanGFX](https://github.com/lovyan03/LovyanGFX)
 - [WiFiManager](https://github.com/tzapu/WiFiManager)
 - [ArduinoJson](https://github.com/bblanchon/ArduinoJson)
+
+## Data sources
+
+The water-body overlay contains information from **OpenStreetMap**, made available under the **[Open Database License (ODbL) v1.0](https://opendatacommons.org/licenses/odbl/1-0/)**.
+
+> © OpenStreetMap contributors — https://www.openstreetmap.org/copyright
+
+`src/data/water_bodies_data.cpp` is a database derived from OSM data, so that credit travels with the firmware, and ODbL's share-alike terms apply to the generated dataset and to anything derived from it. The generated files carry the notice in their headers.
+
+Aircraft positions come from [adsb.fi](https://adsb.fi/); airport and runway geometry from [OurAirports](https://ourairports.com/).

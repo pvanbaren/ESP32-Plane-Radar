@@ -1,29 +1,41 @@
 #!/usr/bin/env python3
-"""Build a water-body outline dataset from the USGS National Hydrography Dataset.
+"""Build a water-body outline dataset from OpenStreetMap via the Overpass API.
 
-The USGS NHD (high-resolution "Large Scale" waterbody layer) is the authoritative
-US water dataset — every lake, pond, and reservoir at full shoreline detail, far
-finer than Natural Earth's curated major-lakes layer. We query it through The
-National Map's ArcGIS REST endpoint as GeoJSON (no geo dependencies — pure
-stdlib), restricted to a bounding box around the radar center and to waterbodies
-at or above a minimum area. We keep only the parts within a fixed radius of the
-center, simplify each shore run with Douglas-Peucker, and emit the result as
-flat polylines of lat/lon (e7).
+OSM gives global coverage, which the previous source (the USGS National
+Hydrography Dataset) could not: NHD is US-only, so any radar center outside the
+United States had no data at all. Overpass is queried over plain HTTP returning
+JSON — no geo dependencies, pure stdlib — for a bounding box around the radar
+center. We keep only the parts within a fixed radius, simplify each shore run
+with Douglas-Peucker, and emit flat polylines of lat/lon (e7).
 
 The center is read from config::kDefaultRadarLat/Lon rather than duplicated
 here, so regenerating always matches the firmware's default location.
 
-NHD is a USGS dataset and covers the **United States only**. Point the radar
-center outside US coverage and the query legitimately returns nothing; the
-build fails rather than writing an empty overlay.
+Two OSM shapes matter:
 
-The server generalizes geometry for us (maxAllowableOffset) so the Great Lakes
-don't arrive as multi-hundred-thousand-vertex polygons; Douglas-Peucker then
-does the final shore-preserving reduction.
+* `natural=water` on ways (simple lakes) and on multipolygon relations (lakes
+  with islands, whose member ways arrive as unordered fragments and have to be
+  stitched into rings — see stitch_rings).
+* `natural=coastline`, which is open linework rather than closed polygons. A
+  coastal center would otherwise render inland lakes and nothing where the sea
+  is. Open runs are clipped by line_runs(), never cyclically, so the two ends
+  are never joined across the map.
 
-Rings that straddle the keep-radius are split into open polylines clipped to the
-region so we don't store the far shore that never renders. Small lakes fully inside
-the window stay closed rings.
+Unlike the old ArcGIS endpoint, Overpass does no server-side generalization, so
+Douglas-Peucker carries the whole size reduction. It has no area filter either;
+MIN_PERIMETER_M stands in for one server-side (see the note there) and
+MIN_AREA_SQKM remains the exact gate client-side. Nor does it paginate: the
+window is split into a TILE_GRID x TILE_GRID mesh and fetched a tile at a time,
+because a single request covering a densely mapped region answers 504. Elements
+are de-duplicated by OSM id, since anything crossing a tile seam comes back from
+both tiles.
+
+Rings that straddle the keep-radius (a large lake mostly outside the window)
+are split into open polylines clipped to the region so we don't store the far
+shore that never renders. Small lakes fully inside stay closed rings.
+
+OSM data is ODbL-licensed: attribution is required, and the share-alike terms
+apply to derived databases such as the generated dataset.
 """
 
 from __future__ import annotations
@@ -31,7 +43,8 @@ from __future__ import annotations
 import json
 import math
 import re
-import urllib.parse
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -40,16 +53,57 @@ CONFIG_H = ROOT / "include" / "config.h"
 OUT_H = ROOT / "include" / "data" / "water_bodies.h"
 OUT_CPP = ROOT / "src" / "data" / "water_bodies_data.cpp"
 
-# NHD high-resolution waterbody layer (12 = "Waterbody - Large Scale") on The
-# National Map's ArcGIS REST service. Polygons, GeoJSON output, server-side
-# pagination and generalization.
-NHD_QUERY_URL = (
-    "https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapServer/12/query"
-)
+# Overpass API endpoint. Public instances are shared and rate-limited; be polite
+# (honest User-Agent, a pause between requests) and expect the odd 429/504.
+# https://overpass.kumi.systems/api/interpreter is a faster mirror if this one
+# is struggling.
+OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
-# FTYPE codes to keep: 390 = LakePond, 436 = Reservoir. (Excludes swamp/marsh,
-# estuary, playa, ice mass — not "bodies of water" for this display.)
-WATERBODY_FTYPES = (390, 436)
+# Per-request server-side budget.
+OVERPASS_TIMEOUT_SEC = 180
+
+# The window is fetched as a TILE_GRID x TILE_GRID mesh rather than one request.
+# A 100-mile radius over a densely mapped region (the Netherlands maps every
+# canal and ditch) is far too much for one query — the public instances answer
+# 504 — but each tile comfortably fits. Raise this if tiles still time out.
+TILE_GRID = 4
+
+# Courtesy pause between tile requests, seconds.
+TILE_DELAY_SEC = 2.0
+
+# Backoff schedule for a throttled or timed-out tile, seconds. Overpass enforces
+# a per-IP cooldown, so the first retry has to wait out the penalty rather than
+# poll at it.
+RETRY_DELAYS_SEC = (20.0, 60.0, 120.0)
+
+# Server-side size gate, in metres of way length, via Overpass's length()
+# evaluator. Overpass can't filter on area, but perimeter is a sound proxy: by
+# the isoperimetric inequality a circle minimises perimeter for a given area, so
+# anything enclosing MIN_AREA_SQKM has a perimeter of at least
+# 2*sqrt(pi*A) ~= 5.0 km at A = 2 km². Cutting below that therefore cannot
+# discard a waterbody the client-side area filter would have kept, and the
+# margin covers relations whose members are measured individually.
+#
+# This is what makes a dense region tractable. Without it a single tile over the
+# Netherlands returns ~17k features -- every pond and drainage ditch -- of which
+# roughly 19 survive the area and radius filters.
+MIN_PERIMETER_M = 4000
+
+# Water subtypes to skip outright, on top of the size gate: these are small by
+# definition and numerous. Negated regexes in Overpass also match elements with
+# no `water` tag at all, so plain `natural=water` still comes through.
+EXCLUDED_WATER_TYPES = (
+    "pond",
+    "ditch",
+    "canal",
+    "basin",
+    "wastewater",
+    "reflecting_pool",
+    "swimming_pool",
+    "moat",
+    "fountain",
+    "fish_pass",
+)
 
 def config_default_center() -> tuple[float, float]:
     """Read kDefaultRadarLat / kDefaultRadarLon out of include/config.h.
@@ -86,16 +140,9 @@ KEEP_RADIUS_KM = KEEP_RADIUS_MI * MI_TO_KM
 # both keeps the dataset small and avoids sub-pixel clutter. Tune to taste.
 MIN_AREA_SQKM = 2.0
 
-# Server-side generalization (maxAllowableOffset, in outSR degrees). Kept a touch
-# finer than the Douglas-Peucker tolerance so the server trims the raw geometry
-# to a manageable size without pre-empting the client-side shore simplification.
-SERVER_GENERALIZE_DEG = 0.0008
-
-# ArcGIS returns at most maxRecordCount (2000) features per request; page through.
-PAGE_SIZE = 2000
-
-# Douglas-Peucker tolerance (degrees). NHD shorelines are dense, so this is the
-# main lever on the embedded dataset's size; it drops near-colinear points while
+# Douglas-Peucker tolerance (degrees). OSM geometry arrives at full resolution
+# (Overpass has no server-side generalization), so this carries the whole load
+# of shrinking the embedded dataset; it drops near-colinear points while
 # preserving the shore shape.
 SIMPLIFY_TOLERANCE_DEG = 0.0015
 
@@ -121,69 +168,200 @@ def keep_bbox() -> tuple[float, float, float, float]:
             CENTER_LON + dlon, CENTER_LAT + dlat)
 
 
-def fetch_nhd_features() -> list[dict]:
-    """Fetch all matching NHD waterbody features in the keep-bbox, paginated."""
-    xmin, ymin, xmax, ymax = keep_bbox()
-    ftypes = ",".join(str(t) for t in WATERBODY_FTYPES)
-    where = f"AREASQKM>={MIN_AREA_SQKM} AND FTYPE IN ({ftypes})"
-    base = {
-        "geometry": f"{xmin},{ymin},{xmax},{ymax}",
-        "geometryType": "esriGeometryEnvelope",
-        "inSR": "4326",
-        "outSR": "4326",
-        "spatialRel": "esriSpatialRelIntersects",
-        "where": where,
-        "outFields": "OBJECTID",
-        "returnGeometry": "true",
-        "maxAllowableOffset": str(SERVER_GENERALIZE_DEG),
-        "orderByFields": "OBJECTID",  # stable order for pagination
-        "resultRecordCount": str(PAGE_SIZE),
-        "f": "geojson",
-    }
+def tile_query(south: float, west: float, north: float, east: float) -> str:
+    """Overpass QL for water polygons + coastline across one tile.
 
-    features: list[dict] = []
-    offset = 0
-    while True:
-        params = dict(base, resultOffset=str(offset))
-        url = NHD_QUERY_URL + "?" + urllib.parse.urlencode(params)
-        req = urllib.request.Request(url, headers={"User-Agent": "plane-radar-build"})
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            page = json.loads(resp.read().decode("utf-8"))
-        if "error" in page:
-            raise RuntimeError(f"NHD query error: {page['error']}")
-        batch = page.get("features", [])
-        features.extend(batch)
-        # exceededTransferLimit (when present) is authoritative; otherwise a full
-        # page means there may be more.
-        more = page.get("exceededTransferLimit")
-        if more is None:
-            more = len(batch) == PAGE_SIZE
-        if not more or not batch:
-            break
-        offset += len(batch)
-    if not features:
+    Coastline is fetched alongside the waterbodies because a sea shore is not a
+    closed polygon in OSM: `natural=coastline` is open linework, which suits a
+    radar overlay that draws polylines anyway. Without it, a coastal center
+    would render inland lakes and nothing where the sea is.
+    """
+    bbox = f"{south:.6f},{west:.6f},{north:.6f},{east:.6f}"
+    skip = "|".join(EXCLUDED_WATER_TYPES)
+    notsmall = f'["water"!~"^({skip})$"]'
+    big = f"(if: length() > {MIN_PERIMETER_M})"
+    return (
+        f"[out:json][timeout:{OVERPASS_TIMEOUT_SEC}];\n"
+        "(\n"
+        f'  way["natural"="water"]{notsmall}({bbox}){big};\n'
+        f'  relation["natural"="water"]["type"="multipolygon"]{notsmall}'
+        f"({bbox}){big};\n"
+        f'  way["natural"="coastline"]({bbox});\n'
+        ");\n"
+        "out geom;\n"
+    )
+
+
+def _post_overpass(query: str) -> dict:
+    req = urllib.request.Request(
+        OVERPASS_URL,
+        data=query.encode("utf-8"),
+        headers={
+            "User-Agent": "plane-radar-build (ESP32-Plane-Radar)",
+            "Content-Type": "text/plain; charset=utf-8",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=OVERPASS_TIMEOUT_SEC + 60) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def fetch_overpass_elements() -> list[dict]:
+    """Fetch the window tile by tile, de-duplicated by OSM id.
+
+    A way or relation straddling a tile seam comes back from every tile it
+    touches, with identical geometry each time, so keying on (type, id) keeps
+    exactly one copy and leaves the geometry untouched.
+    """
+    xmin, ymin, xmax, ymax = keep_bbox()
+    lon_step = (xmax - xmin) / TILE_GRID
+    lat_step = (ymax - ymin) / TILE_GRID
+
+    by_id: dict[tuple[str, int], dict] = {}
+    total = TILE_GRID * TILE_GRID
+    for row in range(TILE_GRID):
+        for col in range(TILE_GRID):
+            n = row * TILE_GRID + col + 1
+            south = ymin + row * lat_step
+            north = south + lat_step
+            west = xmin + col * lon_step
+            east = west + lon_step
+            query = tile_query(south, west, north, east)
+
+            payload = None
+            for attempt in range(len(RETRY_DELAYS_SEC) + 1):
+                try:
+                    payload = _post_overpass(query)
+                    break
+                except urllib.error.HTTPError as exc:
+                    retryable = exc.code in (429, 502, 503, 504)
+                    if not retryable or attempt == len(RETRY_DELAYS_SEC):
+                        raise SystemExit(
+                            f"Overpass tile {n}/{total} failed: "
+                            f"HTTP {exc.code} {exc.reason}.\n"
+                            "Public instances are shared and throttled — retry "
+                            "later, raise TILE_GRID to ask for less at a time, "
+                            "or point OVERPASS_URL at another mirror."
+                        ) from exc
+                    delay = RETRY_DELAYS_SEC[attempt]
+                    print(f"  tile {n}/{total}: HTTP {exc.code}, "
+                          f"retrying in {delay:.0f}s")
+                    time.sleep(delay)
+
+            found = payload.get("elements", []) if payload else []
+            for el in found:
+                key = (el.get("type"), el.get("id"))
+                if key not in by_id:
+                    by_id[key] = el
+            print(f"  tile {n}/{total}: {len(found)} elements "
+                  f"({len(by_id)} unique so far)")
+            if n < total:
+                time.sleep(TILE_DELAY_SEC)
+
+    if not by_id:
         raise SystemExit(
-            f"NHD returned no waterbodies within {KEEP_RADIUS_MI:.0f} mi of "
+            f"Overpass returned no water within {KEEP_RADIUS_MI:.0f} mi of "
             f"({CENTER_LAT}, {CENTER_LON}).\n"
             f"That center comes from config::kDefaultRadarLat/Lon in "
-            f"{CONFIG_H.relative_to(ROOT)}.\n"
-            "NHD is a USGS dataset covering the United States only, so a center "
-            "outside the US has no data to draw."
+            f"{CONFIG_H.relative_to(ROOT)}."
         )
-    return features
+    return list(by_id.values())
 
 
-def iter_rings(geometry: dict):
-    """Yield every linear ring (exterior + interior) as a list of (lon, lat)."""
-    gtype = geometry.get("type")
-    coords = geometry.get("coordinates")
-    if gtype == "Polygon":
-        for ring in coords:
-            yield ring
-    elif gtype == "MultiPolygon":
-        for poly in coords:
-            for ring in poly:
-                yield ring
+def _geom_points(geometry) -> list[tuple[float, float]]:
+    """Overpass `out geom;` node list -> [(lon, lat), ...]."""
+    return [(p["lon"], p["lat"]) for p in geometry or []]
+
+
+def stitch_rings(segments: list[list[tuple[float, float]]]):
+    """Join multipolygon member ways end-to-end.
+
+    OSM stores a lake with islands as a relation whose member ways are arbitrary
+    fragments in arbitrary order and direction, so they have to be walked into
+    rings before anything downstream can treat them as shorelines. Shared nodes
+    come back with byte-identical coordinates, so exact matching is safe here.
+
+    Yields (points, closed). A fragment that never closes is still real shore
+    (the relation may extend past the query window), so it is kept as an open
+    run rather than discarded.
+    """
+    pending = [list(s) for s in segments if len(s) >= 2]
+    while pending:
+        cur = pending.pop()
+        joined = True
+        while joined and cur[0] != cur[-1]:
+            joined = False
+            for i, seg in enumerate(pending):
+                if seg[0] == cur[-1]:
+                    cur.extend(seg[1:])
+                elif seg[-1] == cur[-1]:
+                    cur.extend(reversed(seg[:-1]))
+                elif seg[-1] == cur[0]:
+                    cur[:0] = seg[:-1]
+                elif seg[0] == cur[0]:
+                    cur[:0] = list(reversed(seg[1:]))
+                else:
+                    continue
+                pending.pop(i)
+                joined = True
+                break
+        closed = cur[0] == cur[-1] and len(cur) >= 4
+        if len(cur) >= 2:
+            yield cur, closed
+
+
+def ring_area_sqkm(ring: list[tuple[float, float]]) -> float:
+    """Shoelace area on a local equirectangular projection."""
+    if len(ring) < 3:
+        return 0.0
+    lat0 = sum(lat for _, lat in ring) / len(ring)
+    deg_km = EARTH_RADIUS_KM * math.pi / 180.0
+    kx = deg_km * math.cos(math.radians(lat0))
+    total = 0.0
+    for i in range(len(ring)):
+        lon1, lat1 = ring[i]
+        lon2, lat2 = ring[(i + 1) % len(ring)]
+        total += (lon1 * kx) * (lat2 * deg_km) - (lon2 * kx) * (lat1 * deg_km)
+    return abs(total) / 2.0
+
+
+def iter_shorelines(elements: list[dict]):
+    """Yield (points, closed) shorelines from raw Overpass elements.
+
+    Closed water rings below MIN_AREA_SQKM are dropped here; Overpass has no
+    server-side area filter, so the cut that NHD did in its WHERE clause has to
+    happen client-side.
+    """
+    for el in elements:
+        tags = el.get("tags") or {}
+        kind = el.get("type")
+
+        if kind == "way" and tags.get("natural") == "coastline":
+            pts = _geom_points(el.get("geometry"))
+            if len(pts) >= 2:
+                yield pts, False  # open linework by definition
+            continue
+
+        if tags.get("natural") != "water":
+            continue
+
+        if kind == "way":
+            pts = _geom_points(el.get("geometry"))
+            if len(pts) < 2:
+                continue
+            closed = pts[0] == pts[-1]
+            if closed and ring_area_sqkm(pts) < MIN_AREA_SQKM:
+                continue
+            yield pts, closed
+        elif kind == "relation":
+            segments = [
+                _geom_points(m.get("geometry"))
+                for m in el.get("members") or []
+                if m.get("type") == "way" and m.get("geometry")
+            ]
+            for pts, closed in stitch_rings(segments):
+                if closed and ring_area_sqkm(pts) < MIN_AREA_SQKM:
+                    continue
+                yield pts, closed
 
 
 # ---- Douglas-Peucker on a local planar projection --------------------------
@@ -288,23 +466,62 @@ def ring_runs(ring: list[list[float]]):
     return runs
 
 
+def line_runs(line: list[tuple[float, float]]):
+    """Clip an open polyline to the keep-radius window.
+
+    ring_runs() treats its input as cyclic, which is wrong for coastline and for
+    relation fragments that never closed: joining their two ends would draw a
+    shoreline straight across the map. This walks the line once, keeping one
+    out-of-range vertex on each side of a run so the stroke reaches past the
+    window edge like the ring clipper does.
+    """
+    pts = [(p[0], p[1]) for p in line]
+    if len(pts) < 2:
+        return []
+
+    in_range = [
+        haversine_km(CENTER_LAT, CENTER_LON, lat, lon) <= KEEP_RADIUS_KM
+        for lon, lat in pts
+    ]
+    if all(in_range):
+        return [(pts, False)]
+    if not any(in_range):
+        return []
+
+    runs = []
+    cur = None
+    for i, inside in enumerate(in_range):
+        if inside:
+            if cur is None:
+                cur = [pts[i - 1], pts[i]] if i > 0 else [pts[i]]
+            else:
+                cur.append(pts[i])
+        elif cur is not None:
+            cur.append(pts[i])  # out-of-range trailing margin
+            runs.append((cur, False))
+            cur = None
+    if cur is not None:
+        runs.append((cur, False))
+    return runs
+
+
 def coord_e7(v: float) -> int:
     return int(round(v * 1e7))
 
 
 def build_dataset():
-    features = fetch_nhd_features()
+    elements = fetch_overpass_elements()
     polylines = []  # list of (list[(lat_e7, lon_e7)], closed)
 
-    for feature in features:
-        geom = feature.get("geometry") or {}
-        for ring in iter_rings(geom):
-            for pts, closed in ring_runs(ring):
-                simplified = simplify(pts, SIMPLIFY_TOLERANCE_DEG)
-                if len(simplified) < 2:
-                    continue
-                e7 = [(coord_e7(lat), coord_e7(lon)) for lon, lat in simplified]
-                polylines.append((e7, closed))
+    for shore, closed in iter_shorelines(elements):
+        # Closed rings clip cyclically; open runs must not wrap end-to-start.
+        runs = ring_runs(shore) if closed else line_runs(shore)
+        for pts, run_closed in runs:
+            simplified = simplify(pts, SIMPLIFY_TOLERANCE_DEG)
+            if len(simplified) < 2:
+                continue
+            e7 = [(coord_e7(lat), coord_e7(lon)) for lon, lat in simplified]
+            polylines.append((e7, run_closed))
 
     # Adjacent waterbodies can share an identical boundary edge and some rings
     # survive clipping identically, so drop runs whose exact point list we've
@@ -323,10 +540,25 @@ def build_dataset():
     return deduped
 
 
+# Attribution carried by both generated files. ODbL requires the credit to
+# travel with the data, so it has to live in the emitted source rather than only
+# in this script -- the script is not what gets distributed or compiled.
+ATTRIBUTION_LINES = (
+    "// Generated by scripts/build_water_bodies.py — do not edit.",
+    "//",
+    "// Contains information from OpenStreetMap, which is made available under",
+    "// the Open Database License (ODbL) v1.0.",
+    "// © OpenStreetMap contributors — https://www.openstreetmap.org/copyright",
+    "//",
+    "// This file is a database derived from OSM data: keep this notice with it,",
+    "// and carry the attribution into anything built from it.",
+)
+
+
 def render_header(point_count: int, polyline_count: int) -> str:
     return "\n".join(
         [
-            "// Generated by scripts/build_water_bodies.py — do not edit.",
+            *ATTRIBUTION_LINES,
             "#pragma once",
             "",
             "#include <cstddef>",
@@ -361,7 +593,7 @@ def render_header(point_count: int, polyline_count: int) -> str:
 
 def render_cpp(polylines) -> str:
     lines = [
-        "// Generated by scripts/build_water_bodies.py — do not edit.",
+        *ATTRIBUTION_LINES,
         '#include "data/water_bodies.h"',
         "",
         "namespace data::water_bodies {",
@@ -394,7 +626,8 @@ def render_cpp(polylines) -> str:
 def main() -> int:
     print(
         f"center {CENTER_LAT}, {CENTER_LON} "
-        f"(config::kDefaultRadarLat/Lon), keep radius {KEEP_RADIUS_MI:.0f} mi"
+        f"(config::kDefaultRadarLat/Lon), keep radius {KEEP_RADIUS_MI:.0f} mi, "
+        f"{TILE_GRID}x{TILE_GRID} tiles"
     )
     polylines = build_dataset()
     point_count = sum(len(e7) for e7, _ in polylines)
